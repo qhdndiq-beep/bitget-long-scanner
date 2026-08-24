@@ -3,7 +3,7 @@ name: Bitget 1H Long Scanner
 on:
   workflow_dispatch:
   schedule:
-    - cron: "5 * * * *"
+    - cron: "17 * * * *"
 
 jobs:
   scan:
