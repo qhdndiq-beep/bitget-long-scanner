@@ -1,38 +1,56 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Structure Scanner v1.4
+Bitget 4H -> 15M Structure Scanner v1.5
 
 CORE FLOW
 ---------
 4H CISD
    ↓
-15M Structure Break
+15M SWING STRUCTURE BREAK
    ↓
-15M Pullback
+15M REAL PULLBACK
    ↓
-15M Confirmation
+STRUCTURE / FVG / OB ZONE INTERACTION
    ↓
-Telegram Alert
+15M CONFIRMATION
+   ↓
+FINAL CANDIDATE
 
-v1.4
+v1.5 CHANGE
+-----------
+The previous version treated "previous candle high/low break"
+as a structure break.
+
+v1.5 uses actual local swing highs/lows.
+
+LONG
 ----
-- 4H CISD 유지
-- 15M Structure Break 유지
-- Pullback 조건 완화
-- Structure level / FVG / OB 중 하나에 실제 접근 또는 접촉
-- Pullback 봉이 반드시 구조 레벨 아래/위에서 종가 확정될 필요 없음
-- Pullback 이후 새로운 15M body-close confirmation 필요
-- LONG / SHORT 동시 검색
-- Crypto USDT perpetual만 검색
-- 주문 기능 없음
+1. Recent 4H bullish CISD
+2. Find a meaningful 15M swing high after the 4H CISD
+3. Bullish candle BODY closes above that swing high
+4. Price pulls back toward the broken structure
+5. Pullback interacts with structure / FVG / OB
+6. A later bullish confirmation candle closes above
+   the previous confirmation candle high
+
+SHORT
+-----
+1. Recent 4H bearish CISD
+2. Find a meaningful 15M swing low after the 4H CISD
+3. Bearish candle BODY closes below that swing low
+4. Price pulls back toward the broken structure
+5. Pullback interacts with structure / FVG / OB
+6. A later bearish confirmation candle closes below
+   the previous confirmation candle low
 
 IMPORTANT
 ---------
-Heuristic scanner.
-TradingView / LuxAlgo CISD의 정확한 복제본이 아님.
-"""
+This is a heuristic scanner.
+It is NOT an exact reproduction of TradingView/LuxAlgo CISD.
 
+No trading orders are placed.
+"""
 
 from __future__ import annotations
 
@@ -59,57 +77,73 @@ BASE_URL = "https://api.bitget.com"
 
 PRODUCT_TYPE = "USDT-FUTURES"
 
+# ------------------------------------------------------------
+# History
+# ------------------------------------------------------------
+
 HISTORY_LIMIT_4H = 200
 HISTORY_LIMIT_15M = 300
+
+# ------------------------------------------------------------
+# Workers / HTTP
+# ------------------------------------------------------------
 
 MAX_WORKERS = 8
 
 REQUEST_TIMEOUT = 12
 REQUEST_RETRIES = 3
 
-
-# ============================================================
+# ------------------------------------------------------------
 # 4H CISD
-# ============================================================
+# ------------------------------------------------------------
 
 MAX_4H_CISD_BARS = 8
+# Maximum ~32 hours old
 
-
-# ============================================================
-# 15M STRUCTURE
-# ============================================================
+# ------------------------------------------------------------
+# 15M structure
+# ------------------------------------------------------------
 
 MAX_15M_STRUCTURE_BARS = 96
+# Maximum ~24 hours after 4H CISD
 
+SWING_LEFT = 2
+SWING_RIGHT = 2
 
-# ============================================================
-# PULLBACK
-# ============================================================
+# Minimum number of candles between the 4H event
+# and a usable swing structure.
+MIN_STRUCTURE_DISTANCE = 3
+
+# ------------------------------------------------------------
+# Pullback
+# ------------------------------------------------------------
 
 MAX_PULLBACK_BARS = 32
+# ~8 hours after structure break
 
-# 최소 되돌림.
-# v1.3의 0.05%는 유지하되,
-# 구조 레벨/FVG/OB 접근 조건을 유연하게 처리한다.
 MIN_PULLBACK_PCT = 0.0005
+# 0.05%
 
-# 구조 레벨에서 허용하는 거리.
-# 예: BTC라면 구조 레벨 근처를 조금 넓게 인정.
-STRUCTURE_ZONE_TOLERANCE_PCT = 0.0015
-
-
-# ============================================================
-# CONFIRMATION
-# ============================================================
+# ------------------------------------------------------------
+# Confirmation
+# ------------------------------------------------------------
 
 MAX_CONFIRMATION_BARS = 16
+# ~4 hours after pullback
 
-
-# ============================================================
-# ZONE
-# ============================================================
+# ------------------------------------------------------------
+# Zone
+# ------------------------------------------------------------
 
 ZONE_TOLERANCE_PCT = 0.0015
+
+# ------------------------------------------------------------
+# Signal quality
+# ------------------------------------------------------------
+
+MIN_CISD_BODY_RATIO = 0.35
+MIN_STRUCTURE_BODY_RATIO = 0.30
+MIN_CONFIRMATION_BODY_RATIO = 0.30
 
 
 # ============================================================
@@ -162,10 +196,6 @@ class Signal:
     pullback_confirmed: bool
     confirmation_body_close: bool
 
-    pullback_structure_touch: bool
-    pullback_fvg: bool
-    pullback_ob: bool
-
     fvg_4h: bool
     ob_4h: bool
 
@@ -201,7 +231,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h15m-structure-scanner/1.4",
+                        "bitget-4h15m-structure-scanner/1.5",
                     "Accept":
                         "application/json",
                 },
@@ -252,6 +282,16 @@ def get_json(
 # ============================================================
 
 def get_symbols() -> List[str]:
+
+    """
+    ONLY:
+
+    crypto
+    perpetual
+    USDT
+    online
+    non-RWA
+    """
 
     data = get_json(
         "/api/v3/market/instruments",
@@ -373,9 +413,9 @@ def get_candles(
             15 * 60 * 1000,
     }[granularity]
 
+    # Remove incomplete current candle.
     candles = [
-        x
-        for x in candles
+        x for x in candles
         if x.ts + interval_ms <= now_ms
     ]
 
@@ -399,6 +439,7 @@ def body_size(c: Candle) -> float:
 
 
 def candle_range(c: Candle) -> float:
+
     return max(
         c.h - c.l,
         1e-12
@@ -409,9 +450,168 @@ def body_ratio(c: Candle) -> float:
 
     return (
         body_size(c)
-        / candle_range(c)
+        /
+        candle_range(c)
     )
 
+
+# ============================================================
+# SWING HELPERS
+# ============================================================
+
+def is_swing_high(
+    candles: List[Candle],
+    idx: int,
+    left: int = SWING_LEFT,
+    right: int = SWING_RIGHT
+) -> bool:
+
+    if idx < left:
+        return False
+
+    if idx + right >= len(candles):
+        return False
+
+    current = candles[idx]
+
+    left_values = [
+        candles[j].h
+        for j in range(
+            idx - left,
+            idx
+        )
+    ]
+
+    right_values = [
+        candles[j].h
+        for j in range(
+            idx + 1,
+            idx + right + 1
+        )
+    ]
+
+    return (
+        current.h >= max(left_values)
+        and
+        current.h >= max(right_values)
+    )
+
+
+def is_swing_low(
+    candles: List[Candle],
+    idx: int,
+    left: int = SWING_LEFT,
+    right: int = SWING_RIGHT
+) -> bool:
+
+    if idx < left:
+        return False
+
+    if idx + right >= len(candles):
+        return False
+
+    current = candles[idx]
+
+    left_values = [
+        candles[j].l
+        for j in range(
+            idx - left,
+            idx
+        )
+    ]
+
+    right_values = [
+        candles[j].l
+        for j in range(
+            idx + 1,
+            idx + right + 1
+        )
+    ]
+
+    return (
+        current.l <= min(left_values)
+        and
+        current.l <= min(right_values)
+    )
+
+
+def find_recent_swing_high(
+    candles: List[Candle],
+    start_index: int,
+    end_index: int
+) -> Optional[Dict[str, Any]]:
+
+    start = max(
+        SWING_LEFT,
+        start_index
+    )
+
+    end = min(
+        len(candles) - SWING_RIGHT - 1,
+        end_index
+    )
+
+    # Search newest first.
+    for i in range(
+        end,
+        start - 1,
+        -1
+    ):
+
+        if is_swing_high(
+            candles,
+            i
+        ):
+
+            return {
+                "index": i,
+                "ts": candles[i].ts,
+                "level": candles[i].h,
+            }
+
+    return None
+
+
+def find_recent_swing_low(
+    candles: List[Candle],
+    start_index: int,
+    end_index: int
+) -> Optional[Dict[str, Any]]:
+
+    start = max(
+        SWING_LEFT,
+        start_index
+    )
+
+    end = min(
+        len(candles) - SWING_RIGHT - 1,
+        end_index
+    )
+
+    # Search newest first.
+    for i in range(
+        end,
+        start - 1,
+        -1
+    ):
+
+        if is_swing_low(
+            candles,
+            i
+        ):
+
+            return {
+                "index": i,
+                "ts": candles[i].ts,
+                "level": candles[i].l,
+            }
+
+    return None
+
+
+# ============================================================
+# ZONE OVERLAP
+# ============================================================
 
 def overlaps(
     price_low: float,
@@ -429,31 +629,14 @@ def overlaps(
         (
             (price_low + price_high)
             / 2
-        ) * ZONE_TOLERANCE_PCT
+        )
+        * ZONE_TOLERANCE_PCT
     )
 
     return (
         price_high >= zone.low - tol
         and
         price_low <= zone.high + tol
-    )
-
-
-def price_near_level(
-    candle: Candle,
-    level: float,
-    tolerance_pct: float
-) -> bool:
-
-    tolerance = (
-        level
-        * tolerance_pct
-    )
-
-    return (
-        candle.l <= level + tolerance
-        and
-        candle.h >= level - tolerance
     )
 
 
@@ -484,12 +667,11 @@ def find_latest_cisd(
     ):
 
         cur = candles[i]
-
         ref = candles[i - 1]
 
-        # ====================================================
+        # ----------------------------------------------------
         # LONG
-        # ====================================================
+        # ----------------------------------------------------
 
         if direction == "LONG":
 
@@ -500,12 +682,13 @@ def find_latest_cisd(
             ):
                 continue
 
-            # 반드시 종가가 reference high 돌파
             if cur.c <= ref.h:
                 continue
 
-            # 너무 약한 돌파 방지
-            if body_ratio(cur) < 0.35:
+            if (
+                body_ratio(cur)
+                < MIN_CISD_BODY_RATIO
+            ):
                 continue
 
             sweep = False
@@ -543,9 +726,9 @@ def find_latest_cisd(
                 "sweep": sweep,
             }
 
-        # ====================================================
+        # ----------------------------------------------------
         # SHORT
-        # ====================================================
+        # ----------------------------------------------------
 
         else:
 
@@ -559,7 +742,10 @@ def find_latest_cisd(
             if cur.c >= ref.l:
                 continue
 
-            if body_ratio(cur) < 0.35:
+            if (
+                body_ratio(cur)
+                < MIN_CISD_BODY_RATIO
+            ):
                 continue
 
             sweep = False
@@ -612,6 +798,9 @@ def find_fvgs(
 
     zones: List[Zone] = []
 
+    if len(candles) < 3:
+        return zones
+
     start = max(
         2,
         len(candles) - max_age
@@ -623,12 +812,11 @@ def find_fvgs(
     ):
 
         a = candles[i - 2]
-
         c = candles[i]
 
-        # ====================================================
-        # LONG FVG
-        # ====================================================
+        # ----------------------------------------------------
+        # Bullish FVG
+        # ----------------------------------------------------
 
         if direction == "LONG":
 
@@ -649,9 +837,9 @@ def find_fvgs(
                     )
                 )
 
-        # ====================================================
-        # SHORT FVG
-        # ====================================================
+        # ----------------------------------------------------
+        # Bearish FVG
+        # ----------------------------------------------------
 
         else:
 
@@ -687,6 +875,9 @@ def find_obs(
 
     zones: List[Zone] = []
 
+    if len(candles) < 2:
+        return zones
+
     start = max(
         1,
         len(candles) - max_age
@@ -698,10 +889,12 @@ def find_obs(
     ):
 
         cur = candles[i]
-
         nxt = candles[i + 1]
 
+        # ----------------------------------------------------
         # LONG OB
+        # ----------------------------------------------------
+
         if (
             direction == "LONG"
             and
@@ -727,7 +920,10 @@ def find_obs(
                 )
             )
 
+        # ----------------------------------------------------
         # SHORT OB
+        # ----------------------------------------------------
+
         elif (
             direction == "SHORT"
             and
@@ -757,7 +953,7 @@ def find_obs(
 
 
 # ============================================================
-# 15M STRUCTURE BREAK
+# 15M SWING STRUCTURE BREAK
 # ============================================================
 
 def find_15m_structure(
@@ -767,80 +963,149 @@ def find_15m_structure(
     max_bars: int
 ) -> Optional[Dict[str, Any]]:
 
-    start_index = max(
+    """
+    v1.5
+
+    LONG:
+        Find a confirmed swing high.
+        Later candle must CLOSE above that swing high.
+
+    SHORT:
+        Find a confirmed swing low.
+        Later candle must CLOSE below that swing low.
+
+    We deliberately use confirmed local swings
+    instead of simply using the previous candle.
+    """
+
+    search_start = max(
         2,
         start_index
     )
 
-    end_index = min(
+    search_end = min(
         len(candles) - 1,
         start_index + max_bars
     )
 
-    for i in range(
-        start_index,
-        end_index
-    ):
+    if search_start >= search_end:
+        return None
 
-        cur = candles[i]
+    # --------------------------------------------------------
+    # LONG
+    # --------------------------------------------------------
 
-        ref = candles[i - 1]
+    if direction == "LONG":
 
-        # ====================================================
-        # LONG STRUCTURE BREAK
-        # ====================================================
+        for break_index in range(
+            search_start,
+            search_end + 1
+        ):
 
-        if direction == "LONG":
+            cur = candles[
+                break_index
+            ]
 
-            if not (
-                bullish(cur)
-                and
-                bearish(ref)
+            if (
+                body_ratio(cur)
+                < MIN_STRUCTURE_BODY_RATIO
             ):
                 continue
 
-            if cur.c <= ref.h:
+            # Find the most recent confirmed swing high
+            # BEFORE this breakout candle.
+            swing = find_recent_swing_high(
+                candles,
+                search_start,
+                break_index - SWING_RIGHT - 1
+            )
+
+            if not swing:
                 continue
 
-            if body_ratio(cur) < 0.30:
+            swing_index = swing["index"]
+
+            if (
+                break_index
+                - swing_index
+                < MIN_STRUCTURE_DISTANCE
+            ):
+                continue
+
+            # Body close must break swing high.
+            if cur.c <= swing["level"]:
+                continue
+
+            # Break candle should be bullish.
+            if not bullish(cur):
                 continue
 
             return {
-                "index": i,
+                "index": break_index,
                 "ts": cur.ts,
-                "level": ref.h,
+                "level": swing["level"],
+                "swing_index": swing_index,
+                "swing_ts": swing["ts"],
             }
 
-        # ====================================================
-        # SHORT STRUCTURE BREAK
-        # ====================================================
+    # --------------------------------------------------------
+    # SHORT
+    # --------------------------------------------------------
 
-        else:
+    else:
 
-            if not (
-                bearish(cur)
-                and
-                bullish(ref)
+        for break_index in range(
+            search_start,
+            search_end + 1
+        ):
+
+            cur = candles[
+                break_index
+            ]
+
+            if (
+                body_ratio(cur)
+                < MIN_STRUCTURE_BODY_RATIO
             ):
                 continue
 
-            if cur.c >= ref.l:
+            swing = find_recent_swing_low(
+                candles,
+                search_start,
+                break_index - SWING_RIGHT - 1
+            )
+
+            if not swing:
                 continue
 
-            if body_ratio(cur) < 0.30:
+            swing_index = swing["index"]
+
+            if (
+                break_index
+                - swing_index
+                < MIN_STRUCTURE_DISTANCE
+            ):
+                continue
+
+            if cur.c >= swing["level"]:
+                continue
+
+            if not bearish(cur):
                 continue
 
             return {
-                "index": i,
+                "index": break_index,
                 "ts": cur.ts,
-                "level": ref.l,
+                "level": swing["level"],
+                "swing_index": swing_index,
+                "swing_ts": swing["ts"],
             }
 
     return None
 
 
 # ============================================================
-# PULLBACK + CONFIRMATION v1.4
+# PULLBACK + CONFIRMATION
 # ============================================================
 
 def find_pullback_and_confirmation(
@@ -849,11 +1114,17 @@ def find_pullback_and_confirmation(
     structure: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
 
-    structure_index = structure["index"]
+    structure_index = structure[
+        "index"
+    ]
 
-    structure_level = structure["level"]
+    structure_level = structure[
+        "level"
+    ]
 
-    pull_start = structure_index + 1
+    pull_start = (
+        structure_index + 1
+    )
 
     pull_end = min(
         len(candles) - 1,
@@ -861,47 +1132,14 @@ def find_pullback_and_confirmation(
         + MAX_PULLBACK_BARS
     )
 
-    if pull_start >= pull_end:
+    if pull_start > pull_end:
         return None
 
-    # --------------------------------------------------------
-    # Build zones AFTER structure break.
-    # --------------------------------------------------------
-
-    zone_slice_end = min(
-        len(candles),
-        pull_end + 1
-    )
-
-    zone_candles = candles[
-        structure_index:
-        zone_slice_end
-    ]
-
-    fvgs = find_fvgs(
-        zone_candles,
-        direction,
-        max_age=40
-    )
-
-    obs = find_obs(
-        zone_candles,
-        direction,
-        max_age=40
-    )
+    # ========================================================
+    # STEP A: REAL PULLBACK
+    # ========================================================
 
     pullback_index = None
-
-    pullback_structure_touch = False
-
-    pullback_fvg = False
-
-    pullback_ob = False
-
-    # --------------------------------------------------------
-    # STEP A
-    # Find actual pullback.
-    # --------------------------------------------------------
 
     for i in range(
         pull_start,
@@ -910,177 +1148,65 @@ def find_pullback_and_confirmation(
 
         c = candles[i]
 
-        # ====================================================
+        # ----------------------------------------------------
         # LONG
-        # ====================================================
+        # ----------------------------------------------------
 
         if direction == "LONG":
 
-            # -----------------------------------------------
-            # 1. Structure level touch / near touch
-            # -----------------------------------------------
-
-            structure_touch = price_near_level(
-                c,
-                structure_level,
-                STRUCTURE_ZONE_TOLERANCE_PCT
+            retrace = (
+                structure_level
+                - c.l
             )
 
-            # -----------------------------------------------
-            # 2. FVG interaction
-            # -----------------------------------------------
-
-            fvg_touch = any(
-                overlaps(
-                    c.l,
-                    c.h,
-                    z
-                )
-                for z in fvgs
-            )
-
-            # -----------------------------------------------
-            # 3. OB interaction
-            # -----------------------------------------------
-
-            ob_touch = any(
-                overlaps(
-                    c.l,
-                    c.h,
-                    z
-                )
-                for z in obs
-            )
-
-            # -----------------------------------------------
-            # 4. Minimum retracement
-            # -----------------------------------------------
-
-            retrace = max(
-                0.0,
-                structure_level - c.l
-            )
-
-            minimum_retrace = (
+            # Price touches / penetrates
+            # the broken structure level,
+            # but closes back above it.
+            if (
+                c.l <= structure_level
+                and
+                c.c >= structure_level
+                and
+                retrace
+                >=
                 structure_level
                 * MIN_PULLBACK_PCT
-            )
-
-            enough_retrace = (
-                retrace
-                >= minimum_retrace
-            )
-
-            # -----------------------------------------------
-            # Pullback accepted if:
-            #
-            # structure touch
-            # OR FVG
-            # OR OB
-            #
-            # AND some actual retracement exists.
-            # -----------------------------------------------
-
-            if (
-                enough_retrace
-                and
-                (
-                    structure_touch
-                    or
-                    fvg_touch
-                    or
-                    ob_touch
-                )
             ):
 
                 pullback_index = i
-
-                pullback_structure_touch = (
-                    structure_touch
-                )
-
-                pullback_fvg = fvg_touch
-
-                pullback_ob = ob_touch
-
                 break
 
-        # ====================================================
+        # ----------------------------------------------------
         # SHORT
-        # ====================================================
+        # ----------------------------------------------------
 
         else:
 
-            structure_touch = price_near_level(
-                c,
-                structure_level,
-                STRUCTURE_ZONE_TOLERANCE_PCT
-            )
-
-            fvg_touch = any(
-                overlaps(
-                    c.l,
-                    c.h,
-                    z
-                )
-                for z in fvgs
-            )
-
-            ob_touch = any(
-                overlaps(
-                    c.l,
-                    c.h,
-                    z
-                )
-                for z in obs
-            )
-
-            retrace = max(
-                0.0,
-                c.h - structure_level
-            )
-
-            minimum_retrace = (
-                structure_level
-                * MIN_PULLBACK_PCT
-            )
-
-            enough_retrace = (
-                retrace
-                >= minimum_retrace
+            retrace = (
+                c.h
+                - structure_level
             )
 
             if (
-                enough_retrace
+                c.h >= structure_level
                 and
-                (
-                    structure_touch
-                    or
-                    fvg_touch
-                    or
-                    ob_touch
-                )
+                c.c <= structure_level
+                and
+                retrace
+                >=
+                structure_level
+                * MIN_PULLBACK_PCT
             ):
 
                 pullback_index = i
-
-                pullback_structure_touch = (
-                    structure_touch
-                )
-
-                pullback_fvg = fvg_touch
-
-                pullback_ob = ob_touch
-
                 break
 
     if pullback_index is None:
         return None
 
-    # --------------------------------------------------------
-    # STEP B
-    # Confirmation AFTER pullback only.
-    # --------------------------------------------------------
+    # ========================================================
+    # STEP B: CONFIRMATION
+    # ========================================================
 
     confirm_start = (
         pullback_index + 1
@@ -1101,22 +1227,29 @@ def find_pullback_and_confirmation(
     ):
 
         cur = candles[i]
-
         prev = candles[i - 1]
 
-        # ====================================================
-        # LONG CONFIRMATION
-        # ====================================================
+        # ----------------------------------------------------
+        # LONG
+        # ----------------------------------------------------
 
         if direction == "LONG":
 
             if not bullish(cur):
                 continue
 
-            if cur.c <= prev.h:
+            if (
+                cur.c
+                <=
+                prev.h
+            ):
                 continue
 
-            if body_ratio(cur) < 0.30:
+            if (
+                body_ratio(cur)
+                <
+                MIN_CONFIRMATION_BODY_RATIO
+            ):
                 continue
 
             return {
@@ -1133,30 +1266,29 @@ def find_pullback_and_confirmation(
 
                 "confirmation_ts":
                     cur.ts,
-
-                "structure_touch":
-                    pullback_structure_touch,
-
-                "fvg_touch":
-                    pullback_fvg,
-
-                "ob_touch":
-                    pullback_ob,
             }
 
-        # ====================================================
-        # SHORT CONFIRMATION
-        # ====================================================
+        # ----------------------------------------------------
+        # SHORT
+        # ----------------------------------------------------
 
         else:
 
             if not bearish(cur):
                 continue
 
-            if cur.c >= prev.l:
+            if (
+                cur.c
+                >=
+                prev.l
+            ):
                 continue
 
-            if body_ratio(cur) < 0.30:
+            if (
+                body_ratio(cur)
+                <
+                MIN_CONFIRMATION_BODY_RATIO
+            ):
                 continue
 
             return {
@@ -1173,15 +1305,6 @@ def find_pullback_and_confirmation(
 
                 "confirmation_ts":
                     cur.ts,
-
-                "structure_touch":
-                    pullback_structure_touch,
-
-                "fvg_touch":
-                    pullback_fvg,
-
-                "ob_touch":
-                    pullback_ob,
             }
 
     return None
@@ -1198,12 +1321,14 @@ def find_entry_zone(
     pullback_confirmation: Dict[str, Any]
 ) -> Tuple[
     Optional[float],
-    Optional[float]
+    Optional[float],
+    bool,
+    bool
 ]:
 
-    structure_index = (
-        structure["index"]
-    )
+    structure_index = structure[
+        "index"
+    ]
 
     pullback_index = (
         pullback_confirmation[
@@ -1217,16 +1342,26 @@ def find_entry_zone(
         ]
     )
 
-    relevant = candles[
-        structure_index:
+    start = max(
+        0,
+        structure_index
+    )
+
+    end = min(
+        len(candles),
         confirmation_index + 1
+    )
+
+    relevant = candles[
+        start:end
     ]
 
-    if len(relevant) < 2:
-
+    if len(relevant) < 3:
         return (
-            None,
-            None
+            structure["level"],
+            structure["level"],
+            False,
+            False,
         )
 
     fvgs = find_fvgs(
@@ -1245,7 +1380,14 @@ def find_entry_zone(
         pullback_index
     ]
 
+    fvg_hit = False
+    ob_hit = False
+
     hits: List[Zone] = []
+
+    # --------------------------------------------------------
+    # FVG interaction
+    # --------------------------------------------------------
 
     for z in fvgs:
 
@@ -1255,7 +1397,12 @@ def find_entry_zone(
             z
         ):
 
+            fvg_hit = True
             hits.append(z)
+
+    # --------------------------------------------------------
+    # OB interaction
+    # --------------------------------------------------------
 
     for z in obs:
 
@@ -1265,7 +1412,12 @@ def find_entry_zone(
             z
         ):
 
+            ob_hit = True
             hits.append(z)
+
+    # --------------------------------------------------------
+    # Prefer FVG / OB zone
+    # --------------------------------------------------------
 
     if hits:
 
@@ -1277,52 +1429,40 @@ def find_entry_zone(
                     -
                     (
                         x.low
-                        + x.high
-                    ) / 2
+                        +
+                        x.high
+                    )
+                    / 2
                 )
         )[0]
 
         return (
             z.low,
-            z.high
+            z.high,
+            fvg_hit,
+            ob_hit,
         )
 
     # --------------------------------------------------------
-    # No FVG / OB:
-    # Use structure level + pullback range.
+    # No FVG / OB
+    #
+    # Use the broken structure level plus
+    # pullback candle as practical entry zone.
     # --------------------------------------------------------
-
-    structure_level = (
-        structure["level"]
-    )
-
-    if direction == "LONG":
-
-        low = min(
-            pullback.l,
-            structure_level
-        )
-
-        high = max(
-            pullback.h,
-            structure_level
-        )
-
-    else:
-
-        low = min(
-            pullback.l,
-            structure_level
-        )
-
-        high = max(
-            pullback.h,
-            structure_level
-        )
 
     return (
-        low,
-        high
+        min(
+            structure["level"],
+            pullback.l
+        ),
+
+        max(
+            structure["level"],
+            pullback.h
+        ),
+
+        False,
+        False,
     )
 
 
@@ -1358,6 +1498,10 @@ def analyze_symbol(
 
         results: List[Signal] = []
 
+        # ====================================================
+        # LONG + SHORT
+        # ====================================================
+
         for direction in (
             "LONG",
             "SHORT"
@@ -1377,14 +1521,13 @@ def analyze_symbol(
                 continue
 
             # =================================================
-            # 2. FIND 15M START
+            # 2. 15M START AFTER 4H CISD
             # =================================================
 
             start15 = next(
                 (
                     i
-                    for i, c
-                    in enumerate(c15)
+                    for i, c in enumerate(c15)
                     if c.ts > cisd4["ts"]
                 ),
                 len(c15)
@@ -1392,13 +1535,13 @@ def analyze_symbol(
 
             if (
                 start15
-                >= len(c15) - 10
+                >=
+                len(c15) - 10
             ):
-
                 continue
 
             # =================================================
-            # 3. STRUCTURE
+            # 3. 15M SWING STRUCTURE BREAK
             # =================================================
 
             structure = find_15m_structure(
@@ -1432,7 +1575,9 @@ def analyze_symbol(
 
             (
                 entry_low,
-                entry_high
+                entry_high,
+                fvg15,
+                ob15,
             ) = find_entry_zone(
                 c15,
                 direction,
@@ -1445,7 +1590,7 @@ def analyze_symbol(
             # =================================================
 
             c4_after = c4[
-                cisd4["index"]:
+                cisd4["index"] :
             ]
 
             fvg4_zones = find_fvgs(
@@ -1461,11 +1606,13 @@ def analyze_symbol(
             )
 
             fvg4 = (
-                len(fvg4_zones) > 0
+                len(fvg4_zones)
+                > 0
             )
 
             ob4 = (
-                len(ob4_zones) > 0
+                len(ob4_zones)
+                > 0
             )
 
             # =================================================
@@ -1476,11 +1623,12 @@ def analyze_symbol(
 
             notes = [
                 "4H CISD body-close confirmed",
-                "15M structure break confirmed",
+                "15M swing structure break confirmed",
                 "15M real pullback confirmed",
                 "15M confirmation body-close confirmed",
             ]
 
+            # 4H liquidity sweep
             if cisd4["sweep"]:
 
                 score += 7
@@ -1489,6 +1637,7 @@ def analyze_symbol(
                     "4H liquidity sweep"
                 )
 
+            # 4H FVG
             if fvg4:
 
                 score += 3
@@ -1497,6 +1646,7 @@ def analyze_symbol(
                     "4H FVG exists"
                 )
 
+            # 4H OB
             if ob4:
 
                 score += 3
@@ -1505,15 +1655,8 @@ def analyze_symbol(
                     "4H OB exists"
                 )
 
-            if pc["structure_touch"]:
-
-                score += 5
-
-                notes.append(
-                    "15M pullback touched structure level"
-                )
-
-            if pc["fvg_touch"]:
+            # 15M FVG
+            if fvg15:
 
                 score += 5
 
@@ -1521,7 +1664,8 @@ def analyze_symbol(
                     "15M pullback interacted with FVG"
                 )
 
-            if pc["ob_touch"]:
+            # 15M OB
+            if ob15:
 
                 score += 5
 
@@ -1535,7 +1679,7 @@ def analyze_symbol(
             )
 
             # =================================================
-            # 8. SIGNAL
+            # 8. FINAL SIGNAL
             # =================================================
 
             results.append(
@@ -1544,9 +1688,7 @@ def analyze_symbol(
                     direction=direction,
 
                     score=score,
-
-                    status=
-                        "ENTRY_CANDIDATE",
+                    status="ENTRY_CANDIDATE",
 
                     price=c15[-1].c,
 
@@ -1579,30 +1721,14 @@ def analyze_symbol(
 
                     confirmation_body_close=True,
 
-                    pullback_structure_touch=
-                        pc["structure_touch"],
-
-                    pullback_fvg=
-                        pc["fvg_touch"],
-
-                    pullback_ob=
-                        pc["ob_touch"],
-
                     fvg_4h=fvg4,
-
                     ob_4h=ob4,
 
-                    fvg_15m=
-                        pc["fvg_touch"],
+                    fvg_15m=fvg15,
+                    ob_15m=ob15,
 
-                    ob_15m=
-                        pc["ob_touch"],
-
-                    entry_low=
-                        entry_low,
-
-                    entry_high=
-                        entry_high,
+                    entry_low=entry_low,
+                    entry_high=entry_high,
 
                     notes=notes,
                 )
@@ -1688,7 +1814,8 @@ def format_signal(
         )
 
     return (
-        f"{icon} {s.symbol} | {title}\n"
+        f"{icon} {s.symbol} | "
+        f"{title}\n"
 
         f"점수 {s.score} | "
         f"{s.status}\n"
@@ -1709,32 +1836,34 @@ def format_signal(
         f"OB "
         f"{'✓' if s.ob_4h else '-'}\n"
 
-        f"15M structure "
-        f"{'✓' if s.structure_break else '-'} "
-        f"| pullback "
+        f"15M SWING STRUCTURE "
+        f"{'✓' if s.structure_break else '-'}\n"
+
+        f"structure "
+        f"{short_ts(s.structure_ts)} | "
+        f"level "
+        f"{fmt_price(s.structure_level)}\n"
+
+        f"15M PULLBACK "
         f"{'✓' if s.pullback_confirmed else '-'}\n"
-
-        f"15M pullback: "
-        f"structure "
-        f"{'✓' if s.pullback_structure_touch else '-'} "
-        f"FVG "
-        f"{'✓' if s.pullback_fvg else '-'} "
-        f"OB "
-        f"{'✓' if s.pullback_ob else '-'}\n"
-
-        f"15M confirmation "
-        f"{'✓' if s.confirmation_body_close else '-'}\n"
-
-        f"structure "
-        f"{short_ts(s.structure_ts)}\n"
 
         f"pullback "
         f"{short_ts(s.pullback_ts)}\n"
 
+        f"15M CONFIRMATION "
+        f"{'✓' if s.confirmation_body_close else '-'}\n"
+
         f"confirmation "
         f"{short_ts(s.confirmation_ts)}\n"
 
-        f"zone: {zone}"
+        f"15M zone: "
+        f"FVG "
+        f"{'✓' if s.fvg_15m else '-'} "
+        f"OB "
+        f"{'✓' if s.ob_15m else '-'}\n"
+
+        f"entry zone: "
+        f"{zone}"
     )
 
 
@@ -1759,7 +1888,8 @@ def send_telegram(
     if not token or not chat_id:
 
         print(
-            "[INFO] Telegram secrets are not set."
+            "[INFO] Telegram secrets "
+            "are not set."
         )
 
         return
@@ -1824,10 +1954,15 @@ def build_report(
         )
     )
 
+    # --------------------------------------------------------
+    # NO SIGNAL
+    # --------------------------------------------------------
+
     if not signals:
 
         return (
-            "🔎 4H→15M Structure Scanner v1.4\n"
+            "🔎 "
+            "4H→15M Structure Scanner v1.5\n"
             f"{now}\n\n"
 
             f"스캔 {symbol_count}개\n"
@@ -1835,27 +1970,37 @@ def build_report(
             "🔥 유효 후보 없음\n\n"
 
             "조건:\n"
+
             "4H CISD ✓\n"
-            "15M Structure ✓\n"
+            "15M Swing Structure ✓\n"
             "15M Pullback ✓\n"
             "15M Confirmation ✓"
         )
 
+    # --------------------------------------------------------
+    # SIGNALS
+    # --------------------------------------------------------
+
     blocks = [
         (
-            "🔎 4H→15M Structure Scanner v1.4\n"
+            "🔎 "
+            "4H→15M Structure Scanner v1.5\n"
+
             f"{now}\n"
+
             f"스캔 {symbol_count}개\n"
-            f"🔥 유효 후보 {len(signals)}개"
+
+            f"🔥 유효 후보 "
+            f"{len(signals)}개"
         )
     ]
 
     # Telegram noise reduction.
-    # Top 10 only.
-    for s in signals[:10]:
+    # Only top 10.
+    for signal in signals[:10]:
 
         blocks.append(
-            format_signal(s)
+            format_signal(signal)
         )
 
     return "\n\n".join(
@@ -1874,7 +2019,7 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v1.4\n"
+        " Bitget 4H -> 15M Structure Scanner v1.5\n"
         "============================================\n"
     )
 
@@ -1886,7 +2031,7 @@ def main() -> None:
 
     print(
         "4H CISD -> "
-        "15M STRUCTURE -> "
+        "15M SWING STRUCTURE -> "
         "PULLBACK -> "
         "CONFIRMATION"
     )
