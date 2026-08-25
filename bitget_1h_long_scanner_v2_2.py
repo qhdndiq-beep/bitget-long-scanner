@@ -264,18 +264,17 @@ def main():
 
     lines = [
         "🔥 BITGET 1H / 4H LONG CANDIDATES v2.2",
-        "",
+        ""
     ]
 
     for _, r in rows.iterrows():
         lines.append(
-            f"{r['symbol']} | {r['score']} | {r['classification']}\n"
-            f"{r['setup_reason']}\n"
+            f"{r['symbol']} | {r['score']} | {r['setup_reason']}\n"
             f"현재가: {r['price']:.8g}\n"
             f"진입기준: {r['entry_reference']:.8g}\n"
             f"손절기준: {r['reference_stop']:.8g}\n"
             f"2R 목표: {r['target_1_2R']:.8g}\n"
-            f"손절거리: {r['stop_distance_pct']:.2f}% | "
+            f"손절거리: {r['stop_distance_pct']:.2f}%\n"
             f"RSI: {r['rsi14']:.1f}\n"
         )
 
@@ -295,5 +294,7 @@ def main():
         print("📨 Telegram 전송 완료")
     except Exception as e:
         print(f"⚠️ Telegram 전송 실패: {e}")
+
+
 if __name__ == "__main__":
     main()
