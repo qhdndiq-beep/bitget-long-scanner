@@ -1,43 +1,63 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M CISD Scanner v1.9
+Bitget 4H -> 15M CISD Scanner v2.0
 
-PURPOSE
--------
-v1.9 is a DIAGNOSTIC VERSION.
+CORE IDEA
+---------
+4H LIQUIDITY SWEEP
+        ↓
+4H CISD
+        ↓
+15M STRUCTURE
+        ↓
+15M PULLBACK
+        ↓
+15M ZONE
+        ↓
+15M CONFIRMATION
 
-The previous versions returned:
+v2.0 CHANGE
+-----------
+v1.9 calculated:
 
-4H Directional Event = 0
-4H Liquidity Sweep   = 0
-4H CISD              = 0
+    Sweep
+    CISD
 
-So v1.9 temporarily isolates the 4H logic.
+independently.
 
-It does NOT attempt to generate final trading candidates.
+That created too many false CISD candidates.
 
-The purpose is to determine exactly where 4H candidates disappear.
+v2.0 requires the correct chronological sequence:
 
-DIAGNOSTIC FLOW
----------------
+LONG
+----
+1. Confirmed 4H swing low
+2. Price sweeps below that swing low
+3. Sweep candle closes back above the swing low
+4. A later bullish CISD occurs
+5. CISD candle body closes above the latest bearish reference candle high
 
-465 symbols
-    ↓
-① 4H directional event
-    ↓
-② 4H liquidity sweep
-    ↓
-③ 4H CISD
-
-LONG and SHORT are counted separately.
+SHORT
+-----
+1. Confirmed 4H swing high
+2. Price sweeps above that swing high
+3. Sweep candle closes back below the swing high
+4. A later bearish CISD occurs
+5. CISD candle body closes below the latest bullish reference candle low
 
 IMPORTANT
 ---------
-This is a heuristic scanner.
-It is NOT an exact reproduction of TradingView/LuxAlgo CISD.
+This version is still diagnostic.
+
+15M logic is NOT executed yet.
+
+The purpose is to validate the 4H event definition first.
 
 No trading orders are placed.
+
+This is a heuristic scanner.
+It is NOT an exact reproduction of TradingView/LuxAlgo CISD.
 """
 
 from __future__ import annotations
@@ -71,24 +91,39 @@ MAX_WORKERS = 8
 REQUEST_TIMEOUT = 12
 REQUEST_RETRIES = 3
 
-# ------------------------------------------------------------
-# 4H diagnostic window
-# ------------------------------------------------------------
 
-MAX_4H_LOOKBACK = 20
+# ============================================================
+# 4H EVENT CONFIG
+# ============================================================
 
-# ------------------------------------------------------------
-# Body quality
-# ------------------------------------------------------------
+# Search recent candles only.
+MAX_EVENT_LOOKBACK = 20
 
-MIN_DIRECTION_BODY_RATIO = 0.15
-MIN_CISD_BODY_RATIO = 0.20
+# Sweep must happen within this many candles
+# before the CISD.
+MAX_CISD_AFTER_SWEEP = 6
 
-# ------------------------------------------------------------
-# Liquidity sweep
-# ------------------------------------------------------------
+# Maximum age of final event.
+MAX_FINAL_EVENT_AGE = 8
 
-SWEEP_LOOKBACK = 8
+
+# ============================================================
+# SWING CONFIG
+# ============================================================
+
+SWING_LEFT = 2
+SWING_RIGHT = 2
+
+SWING_LOOKBACK = 30
+
+
+# ============================================================
+# BODY CONFIG
+# ============================================================
+
+MIN_SWEEP_BODY_RATIO = 0.10
+
+MIN_CISD_BODY_RATIO = 0.30
 
 
 # ============================================================
@@ -130,7 +165,9 @@ def get_json(
 
     last_err = None
 
-    for attempt in range(REQUEST_RETRIES):
+    for attempt in range(
+        REQUEST_RETRIES
+    ):
 
         try:
 
@@ -138,7 +175,8 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h-15m-cisd-scanner/1.9",
+                        "bitget-4h-15m-cisd-scanner/2.0",
+
                     "Accept":
                         "application/json",
                 },
@@ -150,8 +188,10 @@ def get_json(
                 timeout=REQUEST_TIMEOUT,
             ) as resp:
 
-                body = resp.read().decode(
-                    "utf-8"
+                body = (
+                    resp
+                    .read()
+                    .decode("utf-8")
                 )
 
                 data = json.loads(body)
@@ -187,7 +227,7 @@ def get_json(
 
 
 # ============================================================
-# SYMBOLS
+# SYMBOL UNIVERSE
 # ============================================================
 
 def get_symbols() -> List[str]:
@@ -282,7 +322,7 @@ def get_symbols() -> List[str]:
 
 
 # ============================================================
-# CANDLES
+# 4H CANDLES
 # ============================================================
 
 def get_4h_candles(
@@ -324,7 +364,10 @@ def get_4h_candles(
         key=lambda x: x.ts
     )
 
+    # --------------------------------------------------------
     # Remove incomplete current candle.
+    # --------------------------------------------------------
+
     now_ms = int(
         time.time() * 1000
     )
@@ -394,124 +437,113 @@ def body_ratio(
 
 
 # ============================================================
-# ① DIRECTIONAL EVENT
+# SWING HIGH / LOW
 # ============================================================
 
-def find_directional_events(
+def is_swing_low(
     candles: List[Candle],
-) -> Dict[str, Optional[Dict[str, Any]]]:
+    index: int,
+) -> bool:
 
-    """
-    Very broad first-stage filter.
+    if index < SWING_LEFT:
+        return False
 
-    LONG:
-        Recent bullish 4H candle.
+    if (
+        index + SWING_RIGHT
+        >= len(candles)
+    ):
+        return False
 
-    SHORT:
-        Recent bearish 4H candle.
+    current = candles[index]
 
-    This stage is intentionally loose.
+    left = candles[
+        index - SWING_LEFT:
+        index
+    ]
 
-    We want to know whether the scanner is
-    seeing normal directional movement at all.
-    """
+    right = candles[
+        index + 1:
+        index + SWING_RIGHT + 1
+    ]
 
-    result = {
-        "LONG": None,
-        "SHORT": None,
-    }
-
-    if len(candles) < 5:
-        return result
-
-    end = len(candles) - 1
-
-    start = max(
-        1,
-        end - MAX_4H_LOOKBACK + 1,
+    return (
+        current.l
+        <= min(
+            x.l for x in left
+        )
+        and
+        current.l
+        <= min(
+            x.l for x in right
+        )
     )
 
-    for i in range(
-        end,
-        start - 1,
-        -1,
-    ):
 
-        c = candles[i]
-
-        ratio = body_ratio(c)
-
-        if (
-            bullish(c)
-            and
-            ratio >= MIN_DIRECTION_BODY_RATIO
-            and
-            result["LONG"] is None
-        ):
-
-            result["LONG"] = {
-                "index": i,
-                "ts": c.ts,
-                "level": c.h,
-            }
-
-        if (
-            bearish(c)
-            and
-            ratio >= MIN_DIRECTION_BODY_RATIO
-            and
-            result["SHORT"] is None
-        ):
-
-            result["SHORT"] = {
-                "index": i,
-                "ts": c.ts,
-                "level": c.l,
-            }
-
-        if (
-            result["LONG"] is not None
-            and
-            result["SHORT"] is not None
-        ):
-
-            break
-
-    return result
-
-
-# ============================================================
-# ② LIQUIDITY SWEEP
-# ============================================================
-
-def find_liquidity_sweep(
+def is_swing_high(
     candles: List[Candle],
-    direction: str,
+    index: int,
+) -> bool:
+
+    if index < SWING_LEFT:
+        return False
+
+    if (
+        index + SWING_RIGHT
+        >= len(candles)
+    ):
+        return False
+
+    current = candles[index]
+
+    left = candles[
+        index - SWING_LEFT:
+        index
+    ]
+
+    right = candles[
+        index + 1:
+        index + SWING_RIGHT + 1
+    ]
+
+    return (
+        current.h
+        >= max(
+            x.h for x in left
+        )
+        and
+        current.h
+        >= max(
+            x.h for x in right
+        )
+    )
+
+
+# ============================================================
+# RECENT SWING LOW
+# ============================================================
+
+def find_recent_swing_low(
+    candles: List[Candle],
+    before_index: int,
 ) -> Optional[Dict[str, Any]]:
 
-    """
-    LONG sweep:
-
-        Current candle takes a previous low
-        and closes back above that low.
-
-    SHORT sweep:
-
-        Current candle takes a previous high
-        and closes back below that high.
-
-    This is deliberately broad in v1.9.
-    """
-
-    if len(candles) < 12:
-        return None
-
-    end = len(candles) - 1
-
     start = max(
-        SWEEP_LOOKBACK + 1,
-        end - MAX_4H_LOOKBACK + 1,
+        SWING_LEFT,
+        before_index
+        - SWING_LOOKBACK,
     )
+
+    end = min(
+        before_index
+        - SWING_RIGHT
+        - 1,
+        len(candles)
+        - SWING_RIGHT
+        - 1,
+    )
+
+    if end < start:
+        return None
 
     for i in range(
         end,
@@ -519,109 +551,46 @@ def find_liquidity_sweep(
         -1,
     ):
 
-        current = candles[i]
+        if is_swing_low(
+            candles,
+            i,
+        ):
 
-        previous_start = max(
-            0,
-            i - SWEEP_LOOKBACK,
-        )
-
-        previous = candles[
-            previous_start:i
-        ]
-
-        if not previous:
-            continue
-
-        # ----------------------------------------------------
-        # LONG
-        # ----------------------------------------------------
-
-        if direction == "LONG":
-
-            prior_low = min(
-                c.l
-                for c in previous
-            )
-
-            if (
-                current.l < prior_low
-                and
-                current.c > prior_low
-            ):
-
-                return {
-                    "index": i,
-                    "ts": current.ts,
-                    "level": prior_low,
-                }
-
-        # ----------------------------------------------------
-        # SHORT
-        # ----------------------------------------------------
-
-        else:
-
-            prior_high = max(
-                c.h
-                for c in previous
-            )
-
-            if (
-                current.h > prior_high
-                and
-                current.c < prior_high
-            ):
-
-                return {
-                    "index": i,
-                    "ts": current.ts,
-                    "level": prior_high,
-                }
+            return {
+                "index": i,
+                "ts": candles[i].ts,
+                "level": candles[i].l,
+            }
 
     return None
 
 
 # ============================================================
-# ③ CISD
+# RECENT SWING HIGH
 # ============================================================
 
-def find_cisd(
+def find_recent_swing_high(
     candles: List[Candle],
-    direction: str,
+    before_index: int,
 ) -> Optional[Dict[str, Any]]:
 
-    """
-    v1.9 CISD diagnostic.
-
-    We deliberately separate:
-
-        direction
-        sweep
-        CISD
-
-    CISD definition used here:
-
-    LONG:
-        bullish candle body closes above
-        the previous bearish candle high.
-
-    SHORT:
-        bearish candle body closes below
-        the previous bullish candle low.
-
-    This is still heuristic.
-    """
-
-    if len(candles) < 20:
-        return None
-
-    end = len(candles) - 1
-
     start = max(
-        2,
-        end - MAX_4H_LOOKBACK + 1,
+        SWING_LEFT,
+        before_index
+        - SWING_LOOKBACK,
     )
+
+    end = min(
+        before_index
+        - SWING_RIGHT
+        - 1,
+        len(candles)
+        - SWING_RIGHT
+        - 1,
+    )
+
+    if end < start:
+        return None
 
     for i in range(
         end,
@@ -629,8 +598,224 @@ def find_cisd(
         -1,
     ):
 
-        current = candles[i]
-        previous = candles[i - 1]
+        if is_swing_high(
+            candles,
+            i,
+        ):
+
+            return {
+                "index": i,
+                "ts": candles[i].ts,
+                "level": candles[i].h,
+            }
+
+    return None
+
+
+# ============================================================
+# LONG SWEEP
+# ============================================================
+
+def find_long_sweep(
+    candles: List[Candle],
+) -> Optional[Dict[str, Any]]:
+
+    """
+    LONG:
+
+        confirmed swing low
+              ↓
+        price trades below it
+              ↓
+        candle closes back above it
+    """
+
+    end = len(candles) - 1
+
+    start = max(
+        SWING_LEFT + SWING_RIGHT + 1,
+        end - MAX_EVENT_LOOKBACK,
+    )
+
+    for sweep_index in range(
+        end,
+        start - 1,
+        -1,
+    ):
+
+        sweep = candles[
+            sweep_index
+        ]
+
+        if (
+            body_ratio(sweep)
+            < MIN_SWEEP_BODY_RATIO
+        ):
+            continue
+
+        swing = (
+            find_recent_swing_low(
+                candles,
+                sweep_index,
+            )
+        )
+
+        if not swing:
+            continue
+
+        level = swing[
+            "level"
+        ]
+
+        # Must actually sweep the swing low.
+        if sweep.l >= level:
+            continue
+
+        # Must reclaim the level.
+        if sweep.c <= level:
+            continue
+
+        return {
+            "index": sweep_index,
+            "ts": sweep.ts,
+            "level": level,
+            "swing_index":
+                swing["index"],
+            "swing_ts":
+                swing["ts"],
+        }
+
+    return None
+
+
+# ============================================================
+# SHORT SWEEP
+# ============================================================
+
+def find_short_sweep(
+    candles: List[Candle],
+) -> Optional[Dict[str, Any]]:
+
+    """
+    SHORT:
+
+        confirmed swing high
+              ↓
+        price trades above it
+              ↓
+        candle closes back below it
+    """
+
+    end = len(candles) - 1
+
+    start = max(
+        SWING_LEFT + SWING_RIGHT + 1,
+        end - MAX_EVENT_LOOKBACK,
+    )
+
+    for sweep_index in range(
+        end,
+        start - 1,
+        -1,
+    ):
+
+        sweep = candles[
+            sweep_index
+        ]
+
+        if (
+            body_ratio(sweep)
+            < MIN_SWEEP_BODY_RATIO
+        ):
+            continue
+
+        swing = (
+            find_recent_swing_high(
+                candles,
+                sweep_index,
+            )
+        )
+
+        if not swing:
+            continue
+
+        level = swing[
+            "level"
+        ]
+
+        # Must actually sweep the swing high.
+        if sweep.h <= level:
+            continue
+
+        # Must reclaim below the level.
+        if sweep.c >= level:
+            continue
+
+        return {
+            "index": sweep_index,
+            "ts": sweep.ts,
+            "level": level,
+            "swing_index":
+                swing["index"],
+            "swing_ts":
+                swing["ts"],
+        }
+
+    return None
+
+
+# ============================================================
+# LONG CISD AFTER SWEEP
+# ============================================================
+
+def find_long_cisd_after_sweep(
+    candles: List[Candle],
+    sweep: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+
+    sweep_index = sweep[
+        "index"
+    ]
+
+    end = min(
+        len(candles) - 1,
+        sweep_index
+        + MAX_CISD_AFTER_SWEEP,
+    )
+
+    # CISD MUST happen after sweep.
+    for cisd_index in range(
+        sweep_index + 1,
+        end + 1,
+    ):
+
+        current = candles[
+            cisd_index
+        ]
+
+        # Need a bearish reference candle.
+        reference = None
+
+        for j in range(
+            cisd_index - 1,
+            sweep_index,
+            -1,
+        ):
+
+            if bearish(
+                candles[j]
+            ):
+
+                reference = candles[j]
+
+                break
+
+        if reference is None:
+            continue
+
+        # Bullish displacement.
+        if not bullish(current):
+            continue
 
         if (
             body_ratio(current)
@@ -638,47 +823,91 @@ def find_cisd(
         ):
             continue
 
-        # ----------------------------------------------------
-        # LONG CISD
-        # ----------------------------------------------------
+        # BODY CLOSE above bearish reference high.
+        if current.c <= reference.h:
+            continue
 
-        if direction == "LONG":
+        return {
+            "index": cisd_index,
+            "ts": current.ts,
+            "level": reference.h,
+            "reference_ts":
+                reference.ts,
+        }
 
-            if not bullish(current):
-                continue
+    return None
 
-            if not bearish(previous):
-                continue
 
-            if current.c <= previous.h:
-                continue
+# ============================================================
+# SHORT CISD AFTER SWEEP
+# ============================================================
 
-            return {
-                "index": i,
-                "ts": current.ts,
-                "level": previous.h,
-            }
+def find_short_cisd_after_sweep(
+    candles: List[Candle],
+    sweep: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
 
-        # ----------------------------------------------------
-        # SHORT CISD
-        # ----------------------------------------------------
+    sweep_index = sweep[
+        "index"
+    ]
 
-        else:
+    end = min(
+        len(candles) - 1,
+        sweep_index
+        + MAX_CISD_AFTER_SWEEP,
+    )
 
-            if not bearish(current):
-                continue
+    # CISD MUST happen after sweep.
+    for cisd_index in range(
+        sweep_index + 1,
+        end + 1,
+    ):
 
-            if not bullish(previous):
-                continue
+        current = candles[
+            cisd_index
+        ]
 
-            if current.c >= previous.l:
-                continue
+        # Need a bullish reference candle.
+        reference = None
 
-            return {
-                "index": i,
-                "ts": current.ts,
-                "level": previous.l,
-            }
+        for j in range(
+            cisd_index - 1,
+            sweep_index,
+            -1,
+        ):
+
+            if bullish(
+                candles[j]
+            ):
+
+                reference = candles[j]
+
+                break
+
+        if reference is None:
+            continue
+
+        # Bearish displacement.
+        if not bearish(current):
+            continue
+
+        if (
+            body_ratio(current)
+            < MIN_CISD_BODY_RATIO
+        ):
+            continue
+
+        # BODY CLOSE below bullish reference low.
+        if current.c >= reference.l:
+            continue
+
+        return {
+            "index": cisd_index,
+            "ts": current.ts,
+            "level": reference.l,
+            "reference_ts":
+                reference.ts,
+        }
 
     return None
 
@@ -692,19 +921,24 @@ def diagnose_symbol(
 ) -> Dict[str, Any]:
 
     result = {
+
         "symbol": symbol,
 
-        "direction_long": False,
-        "direction_short": False,
-
+        # Stage 1
         "sweep_long": False,
         "sweep_short": False,
 
+        # Stage 2
+        "sequence_long": False,
+        "sequence_short": False,
+
+        # Stage 3
         "cisd_long": False,
         "cisd_short": False,
 
-        "direction_long_data": None,
-        "direction_short_data": None,
+        # Stage 4
+        "recent_long": False,
+        "recent_short": False,
 
         "sweep_long_data": None,
         "sweep_short_data": None,
@@ -721,59 +955,26 @@ def diagnose_symbol(
             symbol
         )
 
-        if len(candles) < 30:
-
+        if len(candles) < 50:
             return result
 
         # ====================================================
-        # ① DIRECTION
+        # ① SWEEP
         # ====================================================
 
-        directions = (
-            find_directional_events(
+        long_sweep = (
+            find_long_sweep(
                 candles
             )
         )
 
-        if directions["LONG"]:
-
-            result[
-                "direction_long"
-            ] = True
-
-            result[
-                "direction_long_data"
-            ] = directions["LONG"]
-
-        if directions["SHORT"]:
-
-            result[
-                "direction_short"
-            ] = True
-
-            result[
-                "direction_short_data"
-            ] = directions["SHORT"]
-
-        # ====================================================
-        # ② SWEEP
-        # ====================================================
-
-        sweep_long = (
-            find_liquidity_sweep(
-                candles,
-                "LONG",
+        short_sweep = (
+            find_short_sweep(
+                candles
             )
         )
 
-        sweep_short = (
-            find_liquidity_sweep(
-                candles,
-                "SHORT",
-            )
-        )
-
-        if sweep_long:
+        if long_sweep:
 
             result[
                 "sweep_long"
@@ -781,9 +982,9 @@ def diagnose_symbol(
 
             result[
                 "sweep_long_data"
-            ] = sweep_long
+            ] = long_sweep
 
-        if sweep_short:
+        if short_sweep:
 
             result[
                 "sweep_short"
@@ -791,27 +992,51 @@ def diagnose_symbol(
 
             result[
                 "sweep_short_data"
-            ] = sweep_short
+            ] = short_sweep
+
+        # ====================================================
+        # ② SWEEP → CISD SEQUENCE
+        # ====================================================
+
+        long_cisd = None
+
+        if long_sweep:
+
+            long_cisd = (
+                find_long_cisd_after_sweep(
+                    candles,
+                    long_sweep,
+                )
+            )
+
+            if long_cisd:
+
+                result[
+                    "sequence_long"
+                ] = True
+
+        short_cisd = None
+
+        if short_sweep:
+
+            short_cisd = (
+                find_short_cisd_after_sweep(
+                    candles,
+                    short_sweep,
+                )
+            )
+
+            if short_cisd:
+
+                result[
+                    "sequence_short"
+                ] = True
 
         # ====================================================
         # ③ CISD
         # ====================================================
 
-        cisd_long = (
-            find_cisd(
-                candles,
-                "LONG",
-            )
-        )
-
-        cisd_short = (
-            find_cisd(
-                candles,
-                "SHORT",
-            )
-        )
-
-        if cisd_long:
+        if long_cisd:
 
             result[
                 "cisd_long"
@@ -819,9 +1044,9 @@ def diagnose_symbol(
 
             result[
                 "cisd_long_data"
-            ] = cisd_long
+            ] = long_cisd
 
-        if cisd_short:
+        if short_cisd:
 
             result[
                 "cisd_short"
@@ -829,13 +1054,51 @@ def diagnose_symbol(
 
             result[
                 "cisd_short_data"
-            ] = cisd_short
+            ] = short_cisd
+
+        # ====================================================
+        # ④ RECENTNESS
+        # ====================================================
+
+        latest_index = (
+            len(candles) - 1
+        )
+
+        if long_cisd:
+
+            age = (
+                latest_index
+                -
+                long_cisd["index"]
+            )
+
+            if age <= MAX_FINAL_EVENT_AGE:
+
+                result[
+                    "recent_long"
+                ] = True
+
+        if short_cisd:
+
+            age = (
+                latest_index
+                -
+                short_cisd["index"]
+            )
+
+            if age <= MAX_FINAL_EVENT_AGE:
+
+                result[
+                    "recent_short"
+                ] = True
 
         return result
 
     except Exception as exc:
 
-        result["error"] = str(exc)
+        result[
+            "error"
+        ] = str(exc)
 
         print(
             f"[WARN] {symbol}: {exc}",
@@ -860,21 +1123,9 @@ def build_report(
         "%Y-%m-%d %H:%M UTC"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # COUNTS
-    # --------------------------------------------------------
-
-    direction_long = sum(
-        1
-        for x in diagnostics
-        if x["direction_long"]
-    )
-
-    direction_short = sum(
-        1
-        for x in diagnostics
-        if x["direction_short"]
-    )
+    # ========================================================
 
     sweep_long = sum(
         1
@@ -886,6 +1137,18 @@ def build_report(
         1
         for x in diagnostics
         if x["sweep_short"]
+    )
+
+    sequence_long = sum(
+        1
+        for x in diagnostics
+        if x["sequence_long"]
+    )
+
+    sequence_short = sum(
+        1
+        for x in diagnostics
+        if x["sequence_short"]
     )
 
     cisd_long = sum(
@@ -900,37 +1163,49 @@ def build_report(
         if x["cisd_short"]
     )
 
+    recent_long = sum(
+        1
+        for x in diagnostics
+        if x["recent_long"]
+    )
+
+    recent_short = sum(
+        1
+        for x in diagnostics
+        if x["recent_short"]
+    )
+
     errors = sum(
         1
         for x in diagnostics
         if x["error"]
     )
 
-    # --------------------------------------------------------
-    # FINAL CISD
-    # --------------------------------------------------------
+    # ========================================================
+    # FINAL
+    # ========================================================
 
     final_long = [
         x
         for x in diagnostics
-        if x["cisd_long"]
+        if x["recent_long"]
     ]
 
     final_short = [
         x
         for x in diagnostics
-        if x["cisd_short"]
+        if x["recent_short"]
     ]
 
-    # --------------------------------------------------------
+    # ========================================================
     # REPORT
-    # --------------------------------------------------------
+    # ========================================================
 
     lines = []
 
     lines.append(
         "🔎 "
-        "4H→15M Structure Scanner v1.9"
+        "4H→15M Structure Scanner v2.0"
     )
 
     lines.append(
@@ -950,7 +1225,7 @@ def build_report(
     )
 
     lines.append(
-        "🔬 v1.9 4H DIAGNOSTIC"
+        "🔬 v2.0 4H EVENT DIAGNOSTIC"
     )
 
     lines.append(
@@ -959,22 +1234,12 @@ def build_report(
 
     lines.append("")
 
-    lines.append(
-        "① 4H 방향성 이벤트"
-    )
+    # --------------------------------------------------------
+    # ①
+    # --------------------------------------------------------
 
     lines.append(
-        f"   └ LONG  : {direction_long}"
-    )
-
-    lines.append(
-        f"   └ SHORT : {direction_short}"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "② 4H Liquidity Sweep"
+        "① 4H Liquidity Sweep"
     )
 
     lines.append(
@@ -986,6 +1251,28 @@ def build_report(
     )
 
     lines.append("")
+
+    # --------------------------------------------------------
+    # ②
+    # --------------------------------------------------------
+
+    lines.append(
+        "② Sweep → CISD 순서 성립"
+    )
+
+    lines.append(
+        f"   └ LONG  : {sequence_long}"
+    )
+
+    lines.append(
+        f"   └ SHORT : {sequence_short}"
+    )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # ③
+    # --------------------------------------------------------
 
     lines.append(
         "③ 4H CISD"
@@ -1001,31 +1288,54 @@ def build_report(
 
     lines.append("")
 
+    # --------------------------------------------------------
+    # ④
+    # --------------------------------------------------------
+
+    lines.append(
+        "④ 최근성 조건 통과"
+    )
+
+    lines.append(
+        f"   └ LONG  : {recent_long}"
+    )
+
+    lines.append(
+        f"   └ SHORT : {recent_short}"
+    )
+
+    lines.append("")
+
     lines.append(
         f"⚠️ API/분석 오류 : {errors}"
     )
 
     lines.append("")
 
-    # --------------------------------------------------------
-    # CISD SYMBOLS
-    # --------------------------------------------------------
+    # ========================================================
+    # FINAL SYMBOLS
+    # ========================================================
 
     if final_long:
 
         lines.append(
-            "🟢 LONG CISD 후보"
+            "🟢 FINAL 4H LONG EVENT"
         )
 
         for x in final_long[:10]:
 
-            data = (
+            sweep = (
+                x["sweep_long_data"]
+            )
+
+            cisd = (
                 x["cisd_long_data"]
             )
 
             lines.append(
                 f"   {x['symbol']} | "
-                f"level {data['level']}"
+                f"Sweep {sweep['level']} | "
+                f"CISD {cisd['level']}"
             )
 
         lines.append("")
@@ -1033,51 +1343,67 @@ def build_report(
     if final_short:
 
         lines.append(
-            "🔴 SHORT CISD 후보"
+            "🔴 FINAL 4H SHORT EVENT"
         )
 
         for x in final_short[:10]:
 
-            data = (
+            sweep = (
+                x["sweep_short_data"]
+            )
+
+            cisd = (
                 x["cisd_short_data"]
             )
 
             lines.append(
                 f"   {x['symbol']} | "
-                f"level {data['level']}"
+                f"Sweep {sweep['level']} | "
+                f"CISD {cisd['level']}"
             )
 
         lines.append("")
 
-    # --------------------------------------------------------
-    # FINAL
-    # --------------------------------------------------------
+    # ========================================================
+    # FINAL MESSAGE
+    # ========================================================
 
-    if (
-        cisd_long == 0
-        and
-        cisd_short == 0
-    ):
+    final_count = (
+        len(final_long)
+        +
+        len(final_short)
+    )
+
+    if final_count == 0:
 
         lines.append(
-            "🔥 4H CISD 후보 없음"
+            "🔥 최종 4H 이벤트 없음"
         )
 
     else:
 
         lines.append(
-            "🔥 4H CISD 후보 발견"
+            f"🔥 최종 4H 이벤트 "
+            f"{final_count}개"
         )
 
     lines.append("")
 
     lines.append(
-        "※ v1.9는 4H 진단 전용입니다."
+        "━━━━━━━━━━━━━━━━━━━━━━"
     )
 
     lines.append(
-        "※ 15M Structure/Pullback/"
-        "Confirmation은 아직 실행하지 않습니다."
+        "다음 단계:"
+    )
+
+    lines.append(
+        "4H 이벤트 검증 후 "
+        "15M Structure 연결"
+    )
+
+    lines.append(
+        "━━━━━━━━━━━━━━━━━━━━━━"
     )
 
     return "\n".join(lines)
@@ -1101,7 +1427,11 @@ def send_telegram(
         "",
     ).strip()
 
-    if not token or not chat_id:
+    if (
+        not token
+        or
+        not chat_id
+    ):
 
         print(
             "[INFO] Telegram secrets "
@@ -1117,8 +1447,12 @@ def send_telegram(
 
     payload = urlencode(
         {
-            "chat_id": chat_id,
-            "text": text,
+            "chat_id":
+                chat_id,
+
+            "text":
+                text,
+
             "disable_web_page_preview":
                 "true",
         }
@@ -1153,7 +1487,7 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M CISD Scanner v1.9\n"
+        " Bitget 4H -> 15M CISD Scanner v2.0\n"
         "============================================\n"
     )
 
@@ -1162,9 +1496,8 @@ def main() -> None:
     )
 
     print(
-        "4H Direction -> "
-        "Liquidity Sweep -> "
-        "CISD"
+        "4H SWEEP -> "
+        "4H CISD"
     )
 
     print(
@@ -1277,7 +1610,7 @@ def main() -> None:
     # ========================================================
 
     with open(
-        "cisd_v1_9_diagnostic.json",
+        "cisd_v2_0_diagnostic.json",
         "w",
         encoding="utf-8",
     ) as f:
