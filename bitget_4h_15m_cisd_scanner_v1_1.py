@@ -1,258 +1,59 @@
 #!/usr/bin/env python3
-
+"""Bitget 4H -> 15M Structure Scanner v1.6
+4H CISD -> 15M swing break -> real pullback -> zone interaction -> confirmation.
+No orders are placed. Only completed candles are used.
 """
-Bitget 4H -> 15M Structure Scanner v1.5
-
-CORE FLOW
----------
-4H CISD
-   ↓
-15M SWING STRUCTURE BREAK
-   ↓
-15M REAL PULLBACK
-   ↓
-STRUCTURE / FVG / OB ZONE INTERACTION
-   ↓
-15M CONFIRMATION
-   ↓
-FINAL CANDIDATE
-
-v1.5 CHANGE
------------
-The previous version treated "previous candle high/low break"
-as a structure break.
-
-v1.5 uses actual local swing highs/lows.
-
-LONG
-----
-1. Recent 4H bullish CISD
-2. Find a meaningful 15M swing high after the 4H CISD
-3. Bullish candle BODY closes above that swing high
-4. Price pulls back toward the broken structure
-5. Pullback interacts with structure / FVG / OB
-6. A later bullish confirmation candle closes above
-   the previous confirmation candle high
-
-SHORT
------
-1. Recent 4H bearish CISD
-2. Find a meaningful 15M swing low after the 4H CISD
-3. Bearish candle BODY closes below that swing low
-4. Price pulls back toward the broken structure
-5. Pullback interacts with structure / FVG / OB
-6. A later bearish confirmation candle closes below
-   the previous confirmation candle low
-
-IMPORTANT
----------
-This is a heuristic scanner.
-It is NOT an exact reproduction of TradingView/LuxAlgo CISD.
-
-No trading orders are placed.
-"""
-
 from __future__ import annotations
-
-import json
-import os
-import sys
-import time
-
+import json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-BASE_URL = "https://api.bitget.com"
-
-PRODUCT_TYPE = "USDT-FUTURES"
-
-# ------------------------------------------------------------
-# History
-# ------------------------------------------------------------
-
-HISTORY_LIMIT_4H = 200
-HISTORY_LIMIT_15M = 300
-
-# ------------------------------------------------------------
-# Workers / HTTP
-# ------------------------------------------------------------
-
-MAX_WORKERS = 8
-
-REQUEST_TIMEOUT = 12
-REQUEST_RETRIES = 3
-
-# ------------------------------------------------------------
-# 4H CISD
-# ------------------------------------------------------------
-
-MAX_4H_CISD_BARS = 8
-# Maximum ~32 hours old
-
-# ------------------------------------------------------------
-# 15M structure
-# ------------------------------------------------------------
-
-MAX_15M_STRUCTURE_BARS = 96
-# Maximum ~24 hours after 4H CISD
-
-SWING_LEFT = 2
-SWING_RIGHT = 2
-
-# Minimum number of candles between the 4H event
-# and a usable swing structure.
-MIN_STRUCTURE_DISTANCE = 3
-
-# ------------------------------------------------------------
-# Pullback
-# ------------------------------------------------------------
-
-MAX_PULLBACK_BARS = 32
-# ~8 hours after structure break
-
-MIN_PULLBACK_PCT = 0.0005
-# 0.05%
-
-# ------------------------------------------------------------
-# Confirmation
-# ------------------------------------------------------------
-
-MAX_CONFIRMATION_BARS = 16
-# ~4 hours after pullback
-
-# ------------------------------------------------------------
-# Zone
-# ------------------------------------------------------------
-
-ZONE_TOLERANCE_PCT = 0.0015
-
-# ------------------------------------------------------------
-# Signal quality
-# ------------------------------------------------------------
-
-MIN_CISD_BODY_RATIO = 0.35
-MIN_STRUCTURE_BODY_RATIO = 0.30
-MIN_CONFIRMATION_BODY_RATIO = 0.30
-
-
-# ============================================================
-# DATA STRUCTURES
-# ============================================================
+BASE_URL='https://api.bitget.com'; PRODUCT_TYPE='USDT-FUTURES'
+HISTORY_LIMIT_4H=200; HISTORY_LIMIT_15M=300; MAX_WORKERS=8
+REQUEST_TIMEOUT=12; REQUEST_RETRIES=3
+MAX_4H_CISD_BARS=8; MAX_15M_STRUCTURE_BARS=96
+SWING_LEFT=2; SWING_RIGHT=2; MIN_STRUCTURE_DISTANCE=3
+MAX_PULLBACK_BARS=32; MAX_CONFIRMATION_BARS=16
+ZONE_TOLERANCE_PCT=0.0025
+MIN_CISD_BODY_RATIO=0.35; MIN_STRUCTURE_BODY_RATIO=0.30; MIN_CONFIRMATION_BODY_RATIO=0.25
 
 @dataclass
-class Candle:
-    ts: int
-    o: float
-    h: float
-    l: float
-    c: float
-    v: float
-
-
-@dataclass
-class Zone:
-    kind: str
-    direction: str
-    low: float
-    high: float
-    ts: int
-    age_bars: int
-
+class Candle: ts:int; o:float; h:float; l:float; c:float; v:float
 
 @dataclass
 class Signal:
-    symbol: str
-    direction: str
-
-    score: int
-    status: str
-
-    price: float
-
-    cisd_ts: int
-    cisd_level: float
-
-    structure_ts: int
-    structure_level: float
-
-    pullback_ts: int
-    confirmation_ts: int
-
-    cisd_body_close: bool
-    cisd_sweep: bool
-
-    structure_break: bool
-    pullback_confirmed: bool
-    confirmation_body_close: bool
-
-    fvg_4h: bool
-    ob_4h: bool
-
-    fvg_15m: bool
-    ob_15m: bool
-
-    entry_low: Optional[float]
-    entry_high: Optional[float]
-
-    notes: List[str]
+    symbol:str; direction:str; score:int; status:str; price:float
+    cisd_ts:int; cisd_level:float; structure_ts:int; structure_level:float
+    pullback_ts:int; confirmation_ts:int; cisd_sweep:bool
+    fvg_4h:bool; ob_4h:bool; fvg_15m:bool; ob_15m:bool; structure_retest:bool
+    entry_low:Optional[float]; entry_high:Optional[float]; notes:List[str]
 
 
-# ============================================================
-# HTTP
-# ============================================================
+def get_json(path:str, params:Dict[str,Any])->Dict[str,Any]:
+    url=f'{BASE_URL}{path}?{urlencode(params)}'; err=None
 
-def get_json(
-    path: str,
-    params: Dict[str, Any]
-) -> Dict[str, Any]:
-
-    query = urlencode(params)
-
-    url = f"{BASE_URL}{path}?{query}"
-
-    last_err = None
-
-    for attempt in range(REQUEST_RETRIES):
-
+    for n in range(REQUEST_RETRIES):
         try:
-
-            req = Request(
+            req=Request(
                 url,
                 headers={
-                    "User-Agent":
-                        "bitget-4h15m-structure-scanner/1.5",
-                    "Accept":
-                        "application/json",
+                    'User-Agent':'bitget-4h15m-structure-scanner/1.6',
+                    'Accept':'application/json'
                 },
-                method="GET",
+                method='GET'
             )
 
-            with urlopen(
-                req,
-                timeout=REQUEST_TIMEOUT
-            ) as resp:
+            with urlopen(req,timeout=REQUEST_TIMEOUT) as r:
+                data=json.loads(r.read().decode())
 
-                body = resp.read().decode("utf-8")
-
-                data = json.loads(body)
-
-            if data.get("code") != "00000":
-
+            if data.get('code')!='00000':
                 raise RuntimeError(
-                    f"Bitget API error: "
-                    f"{data.get('code')} "
-                    f"{data.get('msg')}"
+                    f"{data.get('code')} {data.get('msg')}"
                 )
 
             return data
@@ -262,1922 +63,1144 @@ def get_json(
             URLError,
             TimeoutError,
             json.JSONDecodeError,
-            RuntimeError,
-        ) as exc:
+            RuntimeError
+        ) as e:
 
-            last_err = exc
-
-            time.sleep(
-                0.7 * (attempt + 1)
-            )
+            err=e
+            time.sleep(.7*(n+1))
 
     raise RuntimeError(
-        f"Request failed: "
-        f"{url} :: {last_err}"
+        f'Request failed: {url} :: {err}'
     )
 
 
-# ============================================================
-# SYMBOL UNIVERSE
-# ============================================================
+def get_symbols()->List[str]:
 
-def get_symbols() -> List[str]:
-
-    """
-    ONLY:
-
-    crypto
-    perpetual
-    USDT
-    online
-    non-RWA
-    """
-
-    data = get_json(
-        "/api/v3/market/instruments",
-        {
-            "category": PRODUCT_TYPE
-        },
+    d=get_json(
+        '/api/v3/market/instruments',
+        {'category':PRODUCT_TYPE}
     )
 
-    symbols: List[str] = []
+    out=[]
 
-    total = 0
-    excluded = 0
+    for x in d.get('data',[]):
 
-    for item in data.get("data", []):
-
-        total += 1
-
-        symbol = str(
-            item.get("symbol", "")
+        s=str(
+            x.get('symbol','')
         ).strip()
 
-        quote_coin = str(
-            item.get("quoteCoin", "")
+        q=str(
+            x.get('quoteCoin','')
         ).upper().strip()
 
-        symbol_type = str(
-            item.get("symbolType", "")
+        st=str(
+            x.get('symbolType','')
         ).lower().strip()
 
-        contract_type = str(
-            item.get("type", "")
+        typ=str(
+            x.get('type','')
         ).lower().strip()
 
-        status = str(
-            item.get("status", "")
+        status=str(
+            x.get('status','')
         ).lower().strip()
 
-        is_rwa = str(
-            item.get("isRwa", "YES")
+        rwa=str(
+            x.get('isRwa','YES')
         ).upper().strip()
 
         if (
-            symbol.endswith("USDT")
-            and quote_coin == "USDT"
-            and symbol_type == "crypto"
-            and contract_type == "perpetual"
-            and status == "online"
-            and is_rwa == "NO"
+            s.endswith('USDT')
+            and q=='USDT'
+            and st=='crypto'
+            and typ=='perpetual'
+            and status=='online'
+            and rwa=='NO'
         ):
+            out.append(s)
 
-            symbols.append(symbol)
-
-        else:
-
-            excluded += 1
-
-    symbols = sorted(set(symbols))
+    out=sorted(set(out))
 
     print(
-        f"[INFO] instruments: {total} | "
-        f"crypto perpetual selected: {len(symbols)} | "
-        f"excluded: {excluded}"
+        f'[INFO] selected symbols: {len(out)}'
     )
 
-    return symbols
+    return out
 
-
-# ============================================================
-# CANDLES
-# ============================================================
 
 def get_candles(
-    symbol: str,
-    granularity: str,
-    limit: int
-) -> List[Candle]:
+    symbol:str,
+    tf:str,
+    limit:int
+)->List[Candle]:
 
-    data = get_json(
-        "/api/v2/mix/market/history-candles",
+    d=get_json(
+        '/api/v2/mix/market/history-candles',
         {
-            "symbol": symbol,
-            "productType": PRODUCT_TYPE,
-            "granularity": granularity,
-            "limit": limit,
-        },
+            'symbol':symbol,
+            'productType':PRODUCT_TYPE,
+            'granularity':tf,
+            'limit':limit
+        }
     )
 
-    candles: List[Candle] = []
+    interval={
+        '4H':14400000,
+        '15m':900000
+    }[tf]
 
-    for row in data.get("data", []):
+    now=int(
+        time.time()*1000
+    )
 
-        if len(row) < 6:
-            continue
+    out=[]
 
-        candles.append(
-            Candle(
-                ts=int(row[0]),
-                o=float(row[1]),
-                h=float(row[2]),
-                l=float(row[3]),
-                c=float(row[4]),
-                v=float(row[5]),
+    for r in d.get('data',[]):
+
+        if len(r)>=6:
+
+            c=Candle(
+                int(r[0]),
+                float(r[1]),
+                float(r[2]),
+                float(r[3]),
+                float(r[4]),
+                float(r[5])
             )
-        )
 
-    candles.sort(
-        key=lambda x: x.ts
-    )
+            if c.ts+interval<=now:
+                out.append(c)
 
-    now_ms = int(
-        time.time() * 1000
-    )
-
-    interval_ms = {
-        "4H":
-            4 * 60 * 60 * 1000,
-
-        "15m":
-            15 * 60 * 1000,
-    }[granularity]
-
-    # Remove incomplete current candle.
-    candles = [
-        x for x in candles
-        if x.ts + interval_ms <= now_ms
-    ]
-
-    return candles
-
-
-# ============================================================
-# BASIC HELPERS
-# ============================================================
-
-def bullish(c: Candle) -> bool:
-    return c.c > c.o
-
-
-def bearish(c: Candle) -> bool:
-    return c.c < c.o
-
-
-def body_size(c: Candle) -> float:
-    return abs(c.c - c.o)
-
-
-def candle_range(c: Candle) -> float:
-
-    return max(
-        c.h - c.l,
-        1e-12
+    return sorted(
+        out,
+        key=lambda x:x.ts
     )
 
 
-def body_ratio(c: Candle) -> float:
+def bull(c:Candle)->bool:
+    return c.c>c.o
+
+
+def bear(c:Candle)->bool:
+    return c.c<c.o
+
+
+def body_ratio(c:Candle)->float:
 
     return (
-        body_size(c)
+        abs(c.c-c.o)
         /
-        candle_range(c)
+        max(c.h-c.l,1e-12)
     )
 
 
-# ============================================================
-# SWING HELPERS
-# ============================================================
-
-def is_swing_high(
-    candles: List[Candle],
-    idx: int,
-    left: int = SWING_LEFT,
-    right: int = SWING_RIGHT
-) -> bool:
-
-    if idx < left:
-        return False
-
-    if idx + right >= len(candles):
-        return False
-
-    current = candles[idx]
-
-    left_values = [
-        candles[j].h
-        for j in range(
-            idx - left,
-            idx
-        )
-    ]
-
-    right_values = [
-        candles[j].h
-        for j in range(
-            idx + 1,
-            idx + right + 1
-        )
-    ]
+def swing_high(
+    cs:List[Candle],
+    i:int
+)->bool:
 
     return (
-        current.h >= max(left_values)
+        i>=SWING_LEFT
         and
-        current.h >= max(right_values)
+        i+SWING_RIGHT<len(cs)
+        and
+        cs[i].h>=max(
+            x.h
+            for x in cs[
+                i-SWING_LEFT:i
+            ]
+        )
+        and
+        cs[i].h>=max(
+            x.h
+            for x in cs[
+                i+1:i+SWING_RIGHT+1
+            ]
+        )
     )
 
 
-def is_swing_low(
-    candles: List[Candle],
-    idx: int,
-    left: int = SWING_LEFT,
-    right: int = SWING_RIGHT
-) -> bool:
-
-    if idx < left:
-        return False
-
-    if idx + right >= len(candles):
-        return False
-
-    current = candles[idx]
-
-    left_values = [
-        candles[j].l
-        for j in range(
-            idx - left,
-            idx
-        )
-    ]
-
-    right_values = [
-        candles[j].l
-        for j in range(
-            idx + 1,
-            idx + right + 1
-        )
-    ]
+def swing_low(
+    cs:List[Candle],
+    i:int
+)->bool:
 
     return (
-        current.l <= min(left_values)
+        i>=SWING_LEFT
         and
-        current.l <= min(right_values)
-    )
-
-
-def find_recent_swing_high(
-    candles: List[Candle],
-    start_index: int,
-    end_index: int
-) -> Optional[Dict[str, Any]]:
-
-    start = max(
-        SWING_LEFT,
-        start_index
-    )
-
-    end = min(
-        len(candles) - SWING_RIGHT - 1,
-        end_index
-    )
-
-    # Search newest first.
-    for i in range(
-        end,
-        start - 1,
-        -1
-    ):
-
-        if is_swing_high(
-            candles,
-            i
-        ):
-
-            return {
-                "index": i,
-                "ts": candles[i].ts,
-                "level": candles[i].h,
-            }
-
-    return None
-
-
-def find_recent_swing_low(
-    candles: List[Candle],
-    start_index: int,
-    end_index: int
-) -> Optional[Dict[str, Any]]:
-
-    start = max(
-        SWING_LEFT,
-        start_index
-    )
-
-    end = min(
-        len(candles) - SWING_RIGHT - 1,
-        end_index
-    )
-
-    # Search newest first.
-    for i in range(
-        end,
-        start - 1,
-        -1
-    ):
-
-        if is_swing_low(
-            candles,
-            i
-        ):
-
-            return {
-                "index": i,
-                "ts": candles[i].ts,
-                "level": candles[i].l,
-            }
-
-    return None
-
-
-# ============================================================
-# ZONE OVERLAP
-# ============================================================
-
-def overlaps(
-    price_low: float,
-    price_high: float,
-    zone: Zone
-) -> bool:
-
-    tol = max(
-        price_high - price_low,
-        zone.high - zone.low
-    ) * 0.10
-
-    tol = max(
-        tol,
-        (
-            (price_low + price_high)
-            / 2
+        i+SWING_RIGHT<len(cs)
+        and
+        cs[i].l<=min(
+            x.l
+            for x in cs[
+                i-SWING_LEFT:i
+            ]
         )
-        * ZONE_TOLERANCE_PCT
-    )
-
-    return (
-        price_high >= zone.low - tol
         and
-        price_low <= zone.high + tol
+        cs[i].l<=min(
+            x.l
+            for x in cs[
+                i+1:i+SWING_RIGHT+1
+            ]
+        )
     )
 
 
-# ============================================================
-# 4H CISD
-# ============================================================
-
-def find_latest_cisd(
-    candles: List[Candle],
-    direction: str,
-    max_bars: int
-) -> Optional[Dict[str, Any]]:
-
-    if len(candles) < 20:
-        return None
-
-    end = len(candles) - 1
-
-    start = max(
-        3,
-        end - max_bars + 1
-    )
+def latest_swing(
+    cs:List[Candle],
+    start:int,
+    before:int,
+    direction:str
+):
 
     for i in range(
-        end,
-        start - 1,
+        min(
+            before-SWING_RIGHT,
+            len(cs)-SWING_RIGHT-1
+        ),
+        max(start,SWING_LEFT)-1,
         -1
     ):
-
-        cur = candles[i]
-        ref = candles[i - 1]
-
-        # ----------------------------------------------------
-        # LONG
-        # ----------------------------------------------------
-
-        if direction == "LONG":
-
-            if not (
-                bullish(cur)
-                and
-                bearish(ref)
-            ):
-                continue
-
-            if cur.c <= ref.h:
-                continue
-
-            if (
-                body_ratio(cur)
-                < MIN_CISD_BODY_RATIO
-            ):
-                continue
-
-            sweep = False
-
-            for j in range(
-                max(2, i - 8),
-                max(2, i - 1)
-            ):
-
-                previous = candles[
-                    max(0, j - 8):j
-                ]
-
-                if not previous:
-                    continue
-
-                prior_low = min(
-                    x.l
-                    for x in previous
-                )
-
-                if (
-                    candles[j].l < prior_low
-                    and
-                    candles[j].c > prior_low
-                ):
-
-                    sweep = True
-                    break
-
-            return {
-                "index": i,
-                "ts": cur.ts,
-                "level": ref.h,
-                "sweep": sweep,
-            }
-
-        # ----------------------------------------------------
-        # SHORT
-        # ----------------------------------------------------
-
-        else:
-
-            if not (
-                bearish(cur)
-                and
-                bullish(ref)
-            ):
-                continue
-
-            if cur.c >= ref.l:
-                continue
-
-            if (
-                body_ratio(cur)
-                < MIN_CISD_BODY_RATIO
-            ):
-                continue
-
-            sweep = False
-
-            for j in range(
-                max(2, i - 8),
-                max(2, i - 1)
-            ):
-
-                previous = candles[
-                    max(0, j - 8):j
-                ]
-
-                if not previous:
-                    continue
-
-                prior_high = max(
-                    x.h
-                    for x in previous
-                )
-
-                if (
-                    candles[j].h > prior_high
-                    and
-                    candles[j].c < prior_high
-                ):
-
-                    sweep = True
-                    break
-
-            return {
-                "index": i,
-                "ts": cur.ts,
-                "level": ref.l,
-                "sweep": sweep,
-            }
-
-    return None
-
-
-# ============================================================
-# FVG
-# ============================================================
-
-def find_fvgs(
-    candles: List[Candle],
-    direction: str,
-    max_age: int = 60
-) -> List[Zone]:
-
-    zones: List[Zone] = []
-
-    if len(candles) < 3:
-        return zones
-
-    start = max(
-        2,
-        len(candles) - max_age
-    )
-
-    for i in range(
-        start,
-        len(candles)
-    ):
-
-        a = candles[i - 2]
-        c = candles[i]
-
-        # ----------------------------------------------------
-        # Bullish FVG
-        # ----------------------------------------------------
-
-        if direction == "LONG":
-
-            if a.h < c.l:
-
-                zones.append(
-                    Zone(
-                        kind="FVG",
-                        direction=direction,
-                        low=a.h,
-                        high=c.l,
-                        ts=c.ts,
-                        age_bars=(
-                            len(candles)
-                            - 1
-                            - i
-                        ),
-                    )
-                )
-
-        # ----------------------------------------------------
-        # Bearish FVG
-        # ----------------------------------------------------
-
-        else:
-
-            if a.l > c.h:
-
-                zones.append(
-                    Zone(
-                        kind="FVG",
-                        direction=direction,
-                        low=c.h,
-                        high=a.l,
-                        ts=c.ts,
-                        age_bars=(
-                            len(candles)
-                            - 1
-                            - i
-                        ),
-                    )
-                )
-
-    return zones
-
-
-# ============================================================
-# ORDER BLOCK
-# ============================================================
-
-def find_obs(
-    candles: List[Candle],
-    direction: str,
-    max_age: int = 80
-) -> List[Zone]:
-
-    zones: List[Zone] = []
-
-    if len(candles) < 2:
-        return zones
-
-    start = max(
-        1,
-        len(candles) - max_age
-    )
-
-    for i in range(
-        start,
-        len(candles) - 1
-    ):
-
-        cur = candles[i]
-        nxt = candles[i + 1]
-
-        # ----------------------------------------------------
-        # LONG OB
-        # ----------------------------------------------------
 
         if (
-            direction == "LONG"
+            direction=='LONG'
             and
-            bearish(cur)
-            and
-            bullish(nxt)
-            and
-            nxt.c > cur.h
+            swing_high(cs,i)
         ):
 
-            zones.append(
-                Zone(
-                    kind="OB",
-                    direction=direction,
-                    low=cur.l,
-                    high=cur.o,
-                    ts=cur.ts,
-                    age_bars=(
-                        len(candles)
-                        - 1
-                        - i
-                    ),
-                )
-            )
+            return {
+                'index':i,
+                'ts':cs[i].ts,
+                'level':cs[i].h
+            }
 
-        # ----------------------------------------------------
-        # SHORT OB
-        # ----------------------------------------------------
-
-        elif (
-            direction == "SHORT"
+        if (
+            direction=='SHORT'
             and
-            bullish(cur)
-            and
-            bearish(nxt)
-            and
-            nxt.c < cur.l
+            swing_low(cs,i)
         ):
 
-            zones.append(
-                Zone(
-                    kind="OB",
-                    direction=direction,
-                    low=cur.o,
-                    high=cur.h,
-                    ts=cur.ts,
-                    age_bars=(
-                        len(candles)
-                        - 1
-                        - i
-                    ),
-                )
-            )
+            return {
+                'index':i,
+                'ts':cs[i].ts,
+                'level':cs[i].l
+            }
 
-    return zones
+    return None
 
 
-# ============================================================
-# 15M SWING STRUCTURE BREAK
-# ============================================================
+def find_cisd(
+    cs:List[Candle],
+    direction:str
+):
 
-def find_15m_structure(
-    candles: List[Candle],
-    direction: str,
-    start_index: int,
-    max_bars: int
-) -> Optional[Dict[str, Any]]:
+    end=len(cs)-1
 
-    """
-    v1.5
-
-    LONG:
-        Find a confirmed swing high.
-        Later candle must CLOSE above that swing high.
-
-    SHORT:
-        Find a confirmed swing low.
-        Later candle must CLOSE below that swing low.
-
-    We deliberately use confirmed local swings
-    instead of simply using the previous candle.
-    """
-
-    search_start = max(
+    start=max(
         2,
-        start_index
+        end-MAX_4H_CISD_BARS+1
     )
-
-    search_end = min(
-        len(candles) - 1,
-        start_index + max_bars
-    )
-
-    if search_start >= search_end:
-        return None
-
-    # --------------------------------------------------------
-    # LONG
-    # --------------------------------------------------------
-
-    if direction == "LONG":
-
-        for break_index in range(
-            search_start,
-            search_end + 1
-        ):
-
-            cur = candles[
-                break_index
-            ]
-
-            if (
-                body_ratio(cur)
-                < MIN_STRUCTURE_BODY_RATIO
-            ):
-                continue
-
-            # Find the most recent confirmed swing high
-            # BEFORE this breakout candle.
-            swing = find_recent_swing_high(
-                candles,
-                search_start,
-                break_index - SWING_RIGHT - 1
-            )
-
-            if not swing:
-                continue
-
-            swing_index = swing["index"]
-
-            if (
-                break_index
-                - swing_index
-                < MIN_STRUCTURE_DISTANCE
-            ):
-                continue
-
-            # Body close must break swing high.
-            if cur.c <= swing["level"]:
-                continue
-
-            # Break candle should be bullish.
-            if not bullish(cur):
-                continue
-
-            return {
-                "index": break_index,
-                "ts": cur.ts,
-                "level": swing["level"],
-                "swing_index": swing_index,
-                "swing_ts": swing["ts"],
-            }
-
-    # --------------------------------------------------------
-    # SHORT
-    # --------------------------------------------------------
-
-    else:
-
-        for break_index in range(
-            search_start,
-            search_end + 1
-        ):
-
-            cur = candles[
-                break_index
-            ]
-
-            if (
-                body_ratio(cur)
-                < MIN_STRUCTURE_BODY_RATIO
-            ):
-                continue
-
-            swing = find_recent_swing_low(
-                candles,
-                search_start,
-                break_index - SWING_RIGHT - 1
-            )
-
-            if not swing:
-                continue
-
-            swing_index = swing["index"]
-
-            if (
-                break_index
-                - swing_index
-                < MIN_STRUCTURE_DISTANCE
-            ):
-                continue
-
-            if cur.c >= swing["level"]:
-                continue
-
-            if not bearish(cur):
-                continue
-
-            return {
-                "index": break_index,
-                "ts": cur.ts,
-                "level": swing["level"],
-                "swing_index": swing_index,
-                "swing_ts": swing["ts"],
-            }
-
-    return None
-
-
-# ============================================================
-# PULLBACK + CONFIRMATION
-# ============================================================
-
-def find_pullback_and_confirmation(
-    candles: List[Candle],
-    direction: str,
-    structure: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-
-    structure_index = structure[
-        "index"
-    ]
-
-    structure_level = structure[
-        "level"
-    ]
-
-    pull_start = (
-        structure_index + 1
-    )
-
-    pull_end = min(
-        len(candles) - 1,
-        structure_index
-        + MAX_PULLBACK_BARS
-    )
-
-    if pull_start > pull_end:
-        return None
-
-    # ========================================================
-    # STEP A: REAL PULLBACK
-    # ========================================================
-
-    pullback_index = None
 
     for i in range(
-        pull_start,
-        pull_end + 1
+        end,
+        start-1,
+        -1
     ):
 
-        c = candles[i]
+        cur,ref=cs[i],cs[i-1]
 
-        # ----------------------------------------------------
-        # LONG
-        # ----------------------------------------------------
+        if direction=='LONG':
 
-        if direction == "LONG":
-
-            retrace = (
-                structure_level
-                - c.l
-            )
-
-            # Price touches / penetrates
-            # the broken structure level,
-            # but closes back above it.
-            if (
-                c.l <= structure_level
+            if not (
+                bull(cur)
                 and
-                c.c >= structure_level
+                bear(ref)
                 and
-                retrace
-                >=
-                structure_level
-                * MIN_PULLBACK_PCT
-            ):
-
-                pullback_index = i
-                break
-
-        # ----------------------------------------------------
-        # SHORT
-        # ----------------------------------------------------
-
-        else:
-
-            retrace = (
-                c.h
-                - structure_level
-            )
-
-            if (
-                c.h >= structure_level
-                and
-                c.c <= structure_level
-                and
-                retrace
-                >=
-                structure_level
-                * MIN_PULLBACK_PCT
-            ):
-
-                pullback_index = i
-                break
-
-    if pullback_index is None:
-        return None
-
-    # ========================================================
-    # STEP B: CONFIRMATION
-    # ========================================================
-
-    confirm_start = (
-        pullback_index + 1
-    )
-
-    confirm_end = min(
-        len(candles) - 1,
-        pullback_index
-        + MAX_CONFIRMATION_BARS
-    )
-
-    if confirm_start > confirm_end:
-        return None
-
-    for i in range(
-        confirm_start,
-        confirm_end + 1
-    ):
-
-        cur = candles[i]
-        prev = candles[i - 1]
-
-        # ----------------------------------------------------
-        # LONG
-        # ----------------------------------------------------
-
-        if direction == "LONG":
-
-            if not bullish(cur):
-                continue
-
-            if (
-                cur.c
-                <=
-                prev.h
+                cur.c>ref.h
             ):
                 continue
 
             if (
                 body_ratio(cur)
                 <
-                MIN_CONFIRMATION_BODY_RATIO
+                MIN_CISD_BODY_RATIO
             ):
                 continue
 
+            sweep=False
+
+            for j in range(
+                max(2,i-8),
+                i
+            ):
+
+                p=cs[
+                    max(0,j-8):j
+                ]
+
+                if (
+                    p
+                    and
+                    cs[j].l
+                    <
+                    min(x.l for x in p)
+                    and
+                    cs[j].c
+                    >
+                    min(x.l for x in p)
+                ):
+
+                    sweep=True
+                    break
+
             return {
-                "pullback_index":
-                    pullback_index,
-
-                "pullback_ts":
-                    candles[
-                        pullback_index
-                    ].ts,
-
-                "confirmation_index":
-                    i,
-
-                "confirmation_ts":
-                    cur.ts,
+                'index':i,
+                'ts':cur.ts,
+                'level':ref.h,
+                'sweep':sweep
             }
-
-        # ----------------------------------------------------
-        # SHORT
-        # ----------------------------------------------------
 
         else:
 
-            if not bearish(cur):
-                continue
-
-            if (
-                cur.c
-                >=
-                prev.l
+            if not (
+                bear(cur)
+                and
+                bull(ref)
+                and
+                cur.c<ref.l
             ):
                 continue
 
             if (
                 body_ratio(cur)
                 <
-                MIN_CONFIRMATION_BODY_RATIO
+                MIN_CISD_BODY_RATIO
             ):
                 continue
 
+            sweep=False
+
+            for j in range(
+                max(2,i-8),
+                i
+            ):
+
+                p=cs[
+                    max(0,j-8):j
+                ]
+
+                if (
+                    p
+                    and
+                    cs[j].h
+                    >
+                    max(x.h for x in p)
+                    and
+                    cs[j].c
+                    <
+                    max(x.h for x in p)
+                ):
+
+                    sweep=True
+                    break
+
             return {
-                "pullback_index":
-                    pullback_index,
-
-                "pullback_ts":
-                    candles[
-                        pullback_index
-                    ].ts,
-
-                "confirmation_index":
-                    i,
-
-                "confirmation_ts":
-                    cur.ts,
+                'index':i,
+                'ts':cur.ts,
+                'level':ref.l,
+                'sweep':sweep
             }
 
     return None
 
 
-# ============================================================
-# ENTRY ZONE
-# ============================================================
+def find_structure(
+    cs:List[Candle],
+    direction:str,
+    start:int
+):
 
-def find_entry_zone(
-    candles: List[Candle],
-    direction: str,
-    structure: Dict[str, Any],
-    pullback_confirmation: Dict[str, Any]
-) -> Tuple[
-    Optional[float],
-    Optional[float],
-    bool,
-    bool
-]:
-
-    structure_index = structure[
-        "index"
-    ]
-
-    pullback_index = (
-        pullback_confirmation[
-            "pullback_index"
-        ]
+    end=min(
+        len(cs)-1,
+        start+MAX_15M_STRUCTURE_BARS
     )
 
-    confirmation_index = (
-        pullback_confirmation[
-            "confirmation_index"
-        ]
-    )
+    for bi in range(
+        max(
+            start,
+            SWING_LEFT+SWING_RIGHT+1
+        ),
+        end+1
+    ):
 
-    start = max(
-        0,
-        structure_index
-    )
+        cur=cs[bi]
 
-    end = min(
-        len(candles),
-        confirmation_index + 1
-    )
+        if (
+            body_ratio(cur)
+            <
+            MIN_STRUCTURE_BODY_RATIO
+        ):
+            continue
 
-    relevant = candles[
-        start:end
-    ]
-
-    if len(relevant) < 3:
-        return (
-            structure["level"],
-            structure["level"],
-            False,
-            False,
+        sw=latest_swing(
+            cs,
+            start,
+            bi,
+            direction
         )
 
-    fvgs = find_fvgs(
-        relevant,
-        direction,
-        max_age=40
-    )
+        if (
+            not sw
+            or
+            bi-sw['index']
+            <
+            MIN_STRUCTURE_DISTANCE
+        ):
+            continue
 
-    obs = find_obs(
-        relevant,
-        direction,
-        max_age=40
-    )
-
-    pullback = candles[
-        pullback_index
-    ]
-
-    fvg_hit = False
-    ob_hit = False
-
-    hits: List[Zone] = []
-
-    # --------------------------------------------------------
-    # FVG interaction
-    # --------------------------------------------------------
-
-    for z in fvgs:
-
-        if overlaps(
-            pullback.l,
-            pullback.h,
-            z
+        if (
+            direction=='LONG'
+            and
+            bull(cur)
+            and
+            cur.c>sw['level']
         ):
 
-            fvg_hit = True
-            hits.append(z)
+            return {
+                'index':bi,
+                'ts':cur.ts,
+                'level':sw['level'],
+                'swing_index':sw['index']
+            }
 
-    # --------------------------------------------------------
-    # OB interaction
-    # --------------------------------------------------------
-
-    for z in obs:
-
-        if overlaps(
-            pullback.l,
-            pullback.h,
-            z
+        if (
+            direction=='SHORT'
+            and
+            bear(cur)
+            and
+            cur.c<sw['level']
         ):
 
-            ob_hit = True
-            hits.append(z)
+            return {
+                'index':bi,
+                'ts':cur.ts,
+                'level':sw['level'],
+                'swing_index':sw['index']
+            }
 
-    # --------------------------------------------------------
-    # Prefer FVG / OB zone
-    # --------------------------------------------------------
+    return None
 
-    if hits:
 
-        z = sorted(
-            hits,
-            key=lambda x:
-                abs(
-                    pullback.c
-                    -
-                    (
-                        x.low
-                        +
-                        x.high
-                    )
-                    / 2
-                )
-        )[0]
+def fvgs(
+    cs:List[Candle],
+    direction:str,
+    max_age:int=60
+):
 
-        return (
-            z.low,
-            z.high,
-            fvg_hit,
-            ob_hit,
-        )
+    z=[]
 
-    # --------------------------------------------------------
-    # No FVG / OB
-    #
-    # Use the broken structure level plus
-    # pullback candle as practical entry zone.
-    # --------------------------------------------------------
+    start=max(
+        2,
+        len(cs)-max_age
+    )
+
+    for i in range(
+        start,
+        len(cs)
+    ):
+
+        a,c=cs[i-2],cs[i]
+
+        if (
+            direction=='LONG'
+            and
+            a.h<c.l
+        ):
+
+            z.append(
+                ('FVG',a.h,c.l)
+            )
+
+        if (
+            direction=='SHORT'
+            and
+            a.l>c.h
+        ):
+
+            z.append(
+                ('FVG',c.h,a.l)
+            )
+
+    return z
+
+
+def obs(
+    cs:List[Candle],
+    direction:str,
+    max_age:int=80
+):
+
+    z=[]
+
+    start=max(
+        1,
+        len(cs)-max_age
+    )
+
+    for i in range(
+        start,
+        len(cs)-1
+    ):
+
+        a,b=cs[i],cs[i+1]
+
+        if (
+            direction=='LONG'
+            and
+            bear(a)
+            and
+            bull(b)
+            and
+            b.c>a.h
+        ):
+
+            z.append(
+                ('OB',a.l,a.o)
+            )
+
+        if (
+            direction=='SHORT'
+            and
+            bull(a)
+            and
+            bear(b)
+            and
+            b.c<a.l
+        ):
+
+            z.append(
+                ('OB',a.o,a.h)
+            )
+
+    return z
+
+
+def hit(
+    c:Candle,
+    zone
+)->bool:
+
+    _,lo,hi=zone
+
+    lo,hi=min(lo,hi),max(lo,hi)
+
+    mid=(lo+hi)/2
+
+    tol=max(
+        mid*ZONE_TOLERANCE_PCT,
+        (hi-lo)*.15
+    )
 
     return (
-        min(
-            structure["level"],
-            pullback.l
-        ),
-
-        max(
-            structure["level"],
-            pullback.h
-        ),
-
-        False,
-        False,
+        c.h>=lo-tol
+        and
+        c.l<=hi+tol
     )
 
 
-# ============================================================
-# SYMBOL ANALYSIS
-# ============================================================
+def pullback_confirmation(
+    cs:List[Candle],
+    direction:str,
+    structure:Dict[str,Any]
+):
 
-def analyze_symbol(
-    symbol: str
-) -> List[Signal]:
+    si=structure['index']
+
+    level=structure['level']
+
+    end=min(
+        len(cs)-1,
+        si+MAX_PULLBACK_BARS
+    )
+
+    rel=cs[
+        max(0,si-30):
+        end+1
+    ]
+
+    f=fvgs(
+        rel,
+        direction,
+        40
+    )
+
+    o=obs(
+        rel,
+        direction,
+        40
+    )
+
+    for pi in range(
+        si+1,
+        end+1
+    ):
+
+        c=cs[pi]
+
+        if direction=='LONG':
+
+            retest=(
+                c.l
+                <=
+                level*(1+ZONE_TOLERANCE_PCT)
+                and
+                c.h
+                >=
+                level*(1-ZONE_TOLERANCE_PCT)
+            )
+
+            recovered=c.c>=level
+
+        else:
+
+            retest=(
+                c.h
+                >=
+                level*(1-ZONE_TOLERANCE_PCT)
+                and
+                c.l
+                <=
+                level*(1+ZONE_TOLERANCE_PCT)
+            )
+
+            recovered=c.c<=level
+
+        fh=any(
+            hit(c,z)
+            for z in f
+        )
+
+        oh=any(
+            hit(c,z)
+            for z in o
+        )
+
+        # A valid pullback is allowed to interact
+        # with broken structure or a nearby FVG/OB.
+        if (
+            retest
+            or
+            fh
+            or
+            oh
+        ):
+
+            for ci in range(
+                pi+1,
+                min(
+                    len(cs)-1,
+                    pi+MAX_CONFIRMATION_BARS
+                )+1
+            ):
+
+                cur,prev=cs[ci],cs[ci-1]
+
+                if direction=='LONG':
+
+                    ok=(
+                        bull(cur)
+                        and
+                        cur.c>prev.h
+                        and
+                        cur.c>=level
+                        and
+                        body_ratio(cur)
+                        >=
+                        MIN_CONFIRMATION_BODY_RATIO
+                    )
+
+                else:
+
+                    ok=(
+                        bear(cur)
+                        and
+                        cur.c<prev.l
+                        and
+                        cur.c<=level
+                        and
+                        body_ratio(cur)
+                        >=
+                        MIN_CONFIRMATION_BODY_RATIO
+                    )
+
+                if ok:
+
+                    return {
+                        'pullback_index':pi,
+                        'pullback_ts':c.ts,
+                        'confirmation_index':ci,
+                        'confirmation_ts':cur.ts,
+                        'structure':retest,
+                        'fvg':fh,
+                        'ob':oh
+                    }
+
+    return None
+
+
+def analyze(
+    symbol:str
+)->List[Signal]:
 
     try:
 
-        c4 = get_candles(
+        c4=get_candles(
             symbol,
-            "4H",
+            '4H',
             HISTORY_LIMIT_4H
         )
 
-        c15 = get_candles(
+        c15=get_candles(
             symbol,
-            "15m",
+            '15m',
             HISTORY_LIMIT_15M
         )
 
         if (
-            len(c4) < 40
+            len(c4)<40
             or
-            len(c15) < 100
+            len(c15)<100
         ):
 
             return []
 
-        results: List[Signal] = []
+        out=[]
 
-        # ====================================================
-        # LONG + SHORT
-        # ====================================================
-
-        for direction in (
-            "LONG",
-            "SHORT"
+        for d in (
+            'LONG',
+            'SHORT'
         ):
 
-            # =================================================
-            # 1. 4H CISD
-            # =================================================
-
-            cisd4 = find_latest_cisd(
+            cisd=find_cisd(
                 c4,
-                direction,
-                MAX_4H_CISD_BARS
+                d
             )
 
-            if not cisd4:
+            if not cisd:
                 continue
 
-            # =================================================
-            # 2. 15M START AFTER 4H CISD
-            # =================================================
-
-            start15 = next(
+            start=next(
                 (
                     i
-                    for i, c in enumerate(c15)
-                    if c.ts > cisd4["ts"]
+                    for i,c in enumerate(c15)
+                    if c.ts>cisd['ts']
                 ),
                 len(c15)
             )
 
             if (
-                start15
+                start
                 >=
-                len(c15) - 10
+                len(c15)-10
             ):
                 continue
 
-            # =================================================
-            # 3. 15M SWING STRUCTURE BREAK
-            # =================================================
-
-            structure = find_15m_structure(
+            st=find_structure(
                 c15,
-                direction,
-                start15,
-                MAX_15M_STRUCTURE_BARS
+                d,
+                start
             )
 
-            if not structure:
+            if not st:
                 continue
 
-            # =================================================
-            # 4. PULLBACK + CONFIRMATION
-            # =================================================
-
-            pc = (
-                find_pullback_and_confirmation(
-                    c15,
-                    direction,
-                    structure
-                )
+            pc=pullback_confirmation(
+                c15,
+                d,
+                st
             )
 
             if not pc:
                 continue
 
-            # =================================================
-            # 5. ENTRY ZONE
-            # =================================================
-
-            (
-                entry_low,
-                entry_high,
-                fvg15,
-                ob15,
-            ) = find_entry_zone(
-                c15,
-                direction,
-                structure,
-                pc
-            )
-
-            # =================================================
-            # 6. 4H FVG / OB
-            # =================================================
-
-            c4_after = c4[
-                cisd4["index"] :
+            c4a=c4[
+                cisd['index']:
             ]
 
-            fvg4_zones = find_fvgs(
-                c4_after,
-                direction,
-                max_age=40
+            f4=bool(
+                fvgs(
+                    c4a,
+                    d,
+                    40
+                )
             )
 
-            ob4_zones = find_obs(
-                c4_after,
-                direction,
-                max_age=50
+            o4=bool(
+                obs(
+                    c4a,
+                    d,
+                    50
+                )
             )
 
-            fvg4 = (
-                len(fvg4_zones)
-                > 0
+            score=(
+                70
+                +(7 if cisd['sweep'] else 0)
+                +(3 if f4 else 0)
+                +(3 if o4 else 0)
+                +(5 if pc['fvg'] else 0)
+                +(5 if pc['ob'] else 0)
+                +(3 if pc['structure'] else 0)
             )
 
-            ob4 = (
-                len(ob4_zones)
-                > 0
+            lo,hi=(
+                st['level'],
+                st['level']
             )
 
-            # =================================================
-            # 7. SCORE
-            # =================================================
-
-            score = 70
-
-            notes = [
-                "4H CISD body-close confirmed",
-                "15M swing structure break confirmed",
-                "15M real pullback confirmed",
-                "15M confirmation body-close confirmed",
+            p=c15[
+                pc['pullback_index']
             ]
 
-            # 4H liquidity sweep
-            if cisd4["sweep"]:
-
-                score += 7
-
-                notes.append(
-                    "4H liquidity sweep"
-                )
-
-            # 4H FVG
-            if fvg4:
-
-                score += 3
-
-                notes.append(
-                    "4H FVG exists"
-                )
-
-            # 4H OB
-            if ob4:
-
-                score += 3
-
-                notes.append(
-                    "4H OB exists"
-                )
-
-            # 15M FVG
-            if fvg15:
-
-                score += 5
-
-                notes.append(
-                    "15M pullback interacted with FVG"
-                )
-
-            # 15M OB
-            if ob15:
-
-                score += 5
-
-                notes.append(
-                    "15M pullback interacted with OB"
-                )
-
-            score = min(
-                score,
-                100
+            lo=min(
+                lo,
+                p.l
             )
 
-            # =================================================
-            # 8. FINAL SIGNAL
-            # =================================================
+            hi=max(
+                hi,
+                p.h
+            )
 
-            results.append(
+            out.append(
                 Signal(
-                    symbol=symbol,
-                    direction=direction,
-
-                    score=score,
-                    status="ENTRY_CANDIDATE",
-
+                    symbol=d and symbol,
+                    direction=d,
+                    score=min(score,100),
+                    status='ENTRY_CANDIDATE',
                     price=c15[-1].c,
 
-                    cisd_ts=
-                        cisd4["ts"],
+                    cisd_ts=cisd['ts'],
+                    cisd_level=cisd['level'],
 
-                    cisd_level=
-                        cisd4["level"],
-
-                    structure_ts=
-                        structure["ts"],
-
-                    structure_level=
-                        structure["level"],
+                    structure_ts=st['ts'],
+                    structure_level=st['level'],
 
                     pullback_ts=
-                        pc["pullback_ts"],
+                        pc['pullback_ts'],
 
                     confirmation_ts=
-                        pc["confirmation_ts"],
-
-                    cisd_body_close=True,
+                        pc['confirmation_ts'],
 
                     cisd_sweep=
-                        cisd4["sweep"],
+                        cisd['sweep'],
 
-                    structure_break=True,
+                    fvg_4h=f4,
+                    ob_4h=o4,
 
-                    pullback_confirmed=True,
+                    fvg_15m=pc['fvg'],
+                    ob_15m=pc['ob'],
 
-                    confirmation_body_close=True,
+                    structure_retest=
+                        pc['structure'],
 
-                    fvg_4h=fvg4,
-                    ob_4h=ob4,
+                    entry_low=lo,
+                    entry_high=hi,
 
-                    fvg_15m=fvg15,
-                    ob_15m=ob15,
-
-                    entry_low=entry_low,
-                    entry_high=entry_high,
-
-                    notes=notes,
+                    notes=[
+                        '4H CISD',
+                        '15M swing structure break',
+                        '15M pullback',
+                        '15M confirmation'
+                    ]
                 )
             )
 
-        return results
+        return out
 
-    except Exception as exc:
+    except Exception as e:
 
         print(
-            f"[WARN] {symbol}: {exc}",
+            f'[WARN] {symbol}: {e}',
             file=sys.stderr
         )
 
         return []
 
 
-# ============================================================
-# FORMAT
-# ============================================================
-
-def fmt_price(
-    x: Optional[float]
-) -> str:
+def price(
+    x
+):
 
     if x is None:
-        return "-"
+        return '-'
 
-    if x >= 1000:
+    if x>=1000:
+        return f'{x:,.2f}'
 
-        return f"{x:,.2f}"
+    if x>=1:
+        return f'{x:,.4f}'
 
-    if x >= 1:
-
-        return f"{x:,.4f}"
-
-    return f"{x:.8f}"
+    return f'{x:.8f}'
 
 
-def short_ts(
-    ms: int
-) -> str:
+def ts(x):
 
     return datetime.fromtimestamp(
-        ms / 1000,
+        x/1000,
         tz=timezone.utc
     ).strftime(
-        "%m-%d %H:%M UTC"
+        '%m-%d %H:%M UTC'
     )
 
 
 def format_signal(
-    s: Signal
-) -> str:
+    s:Signal
+)->str:
 
-    if s.direction == "LONG":
-
-        icon = "🟢"
-
-        title = "LONG 후보"
-
-    else:
-
-        icon = "🔴"
-
-        title = (
-            "SHORT 후보 / "
-            "LONG 청산경고"
-        )
-
-    zone = "-"
-
-    if (
-        s.entry_low is not None
-        and
-        s.entry_high is not None
-    ):
-
-        zone = (
-            f"{fmt_price(s.entry_low)}"
-            f" ~ "
-            f"{fmt_price(s.entry_high)}"
-        )
+    icon=(
+        '🟢'
+        if s.direction=='LONG'
+        else
+        '🔴'
+    )
 
     return (
-        f"{icon} {s.symbol} | "
-        f"{title}\n"
+        f'{icon} {s.symbol} | '
+        f'{s.direction}\n'
 
-        f"점수 {s.score} | "
-        f"{s.status}\n"
+        f'점수 {s.score} | '
+        f'{s.status}\n'
 
-        f"현재가 "
-        f"{fmt_price(s.price)}\n"
+        f'현재가 '
+        f'{price(s.price)}\n'
 
-        f"4H CISD "
-        f"{short_ts(s.cisd_ts)} | "
-        f"레벨 "
-        f"{fmt_price(s.cisd_level)}\n"
+        f'4H CISD '
+        f'{ts(s.cisd_ts)} | '
+        f'level '
+        f'{price(s.cisd_level)} | '
+        f'sweep '
+        f'{"✓" if s.cisd_sweep else "-"}\n'
 
-        f"4H: body✓ "
-        f"sweep "
-        f"{'✓' if s.cisd_sweep else '-'} "
-        f"FVG "
-        f"{'✓' if s.fvg_4h else '-'} "
-        f"OB "
-        f"{'✓' if s.ob_4h else '-'}\n"
+        f'4H FVG '
+        f'{"✓" if s.fvg_4h else "-"} | '
+        f'OB '
+        f'{"✓" if s.ob_4h else "-"}\n'
 
-        f"15M SWING STRUCTURE "
-        f"{'✓' if s.structure_break else '-'}\n"
+        f'15M SWING STRUCTURE ✓ | '
+        f'{ts(s.structure_ts)} | '
+        f'level '
+        f'{price(s.structure_level)}\n'
 
-        f"structure "
-        f"{short_ts(s.structure_ts)} | "
-        f"level "
-        f"{fmt_price(s.structure_level)}\n"
+        f'15M PULLBACK ✓ | '
+        f'{ts(s.pullback_ts)} | '
+        f'structure '
+        f'{"✓" if s.structure_retest else "-"} | '
+        f'FVG '
+        f'{"✓" if s.fvg_15m else "-"} | '
+        f'OB '
+        f'{"✓" if s.ob_15m else "-"}\n'
 
-        f"15M PULLBACK "
-        f"{'✓' if s.pullback_confirmed else '-'}\n"
+        f'15M CONFIRMATION ✓ | '
+        f'{ts(s.confirmation_ts)}\n'
 
-        f"pullback "
-        f"{short_ts(s.pullback_ts)}\n"
-
-        f"15M CONFIRMATION "
-        f"{'✓' if s.confirmation_body_close else '-'}\n"
-
-        f"confirmation "
-        f"{short_ts(s.confirmation_ts)}\n"
-
-        f"15M zone: "
-        f"FVG "
-        f"{'✓' if s.fvg_15m else '-'} "
-        f"OB "
-        f"{'✓' if s.ob_15m else '-'}\n"
-
-        f"entry zone: "
-        f"{zone}"
+        f'entry zone: '
+        f'{price(s.entry_low)} ~ '
+        f'{price(s.entry_high)}'
     )
 
 
-# ============================================================
-# TELEGRAM
-# ============================================================
+def telegram(
+    text:str
+):
 
-def send_telegram(
-    text: str
-) -> None:
-
-    token = os.getenv(
-        "TELEGRAM_BOT_TOKEN",
-        ""
+    token=os.getenv(
+        'TELEGRAM_BOT_TOKEN',
+        ''
     ).strip()
 
-    chat_id = os.getenv(
-        "TELEGRAM_CHAT_ID",
-        ""
+    chat=os.getenv(
+        'TELEGRAM_CHAT_ID',
+        ''
     ).strip()
 
-    if not token or not chat_id:
-
-        print(
-            "[INFO] Telegram secrets "
-            "are not set."
-        )
-
+    if not token or not chat:
         return
 
-    url = (
-        "https://api.telegram.org/"
-        f"bot{token}/sendMessage"
-    )
-
-    payload = urlencode(
+    data=urlencode(
         {
-            "chat_id":
-                chat_id,
-
-            "text":
-                text,
-
-            "disable_web_page_preview":
-                "true",
+            'chat_id':chat,
+            'text':text,
+            'disable_web_page_preview':'true'
         }
     ).encode()
 
-    req = Request(
-        url,
-        data=payload,
+    req=Request(
+        f'https://api.telegram.org/bot{token}/sendMessage',
+        data=data,
         headers={
-            "Content-Type":
-                "application/x-www-form-urlencoded"
+            'Content-Type':
+                'application/x-www-form-urlencoded'
         },
-        method="POST",
+        method='POST'
     )
 
     with urlopen(
         req,
         timeout=REQUEST_TIMEOUT
-    ) as resp:
+    ) as r:
 
-        resp.read()
-
-
-# ============================================================
-# REPORT
-# ============================================================
-
-def build_report(
-    signals: List[Signal],
-    symbol_count: int
-) -> str:
-
-    now = datetime.now(
-        timezone.utc
-    ).strftime(
-        "%Y-%m-%d %H:%M UTC"
-    )
-
-    signals = sorted(
-        signals,
-        key=lambda x: (
-            -x.score,
-            x.symbol,
-            x.direction
-        )
-    )
-
-    # --------------------------------------------------------
-    # NO SIGNAL
-    # --------------------------------------------------------
-
-    if not signals:
-
-        return (
-            "🔎 "
-            "4H→15M Structure Scanner v1.5\n"
-            f"{now}\n\n"
-
-            f"스캔 {symbol_count}개\n"
-
-            "🔥 유효 후보 없음\n\n"
-
-            "조건:\n"
-
-            "4H CISD ✓\n"
-            "15M Swing Structure ✓\n"
-            "15M Pullback ✓\n"
-            "15M Confirmation ✓"
-        )
-
-    # --------------------------------------------------------
-    # SIGNALS
-    # --------------------------------------------------------
-
-    blocks = [
-        (
-            "🔎 "
-            "4H→15M Structure Scanner v1.5\n"
-
-            f"{now}\n"
-
-            f"스캔 {symbol_count}개\n"
-
-            f"🔥 유효 후보 "
-            f"{len(signals)}개"
-        )
-    ]
-
-    # Telegram noise reduction.
-    # Only top 10.
-    for signal in signals[:10]:
-
-        blocks.append(
-            format_signal(signal)
-        )
-
-    return "\n\n".join(
-        blocks
-    )
+        r.read()
 
 
-# ============================================================
-# MAIN
-# ============================================================
+def main():
 
-def main() -> None:
-
-    started = time.time()
+    t=time.time()
 
     print(
-        "\n"
-        "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v1.5\n"
-        "============================================\n"
+        '\n'
+        '============================================\n'
+        ' Bitget 4H -> 15M Structure Scanner v1.6\n'
+        '============================================'
     )
 
     print(
-        "CRYPTO ONLY | "
-        "USDT PERPETUAL ONLY | "
-        "LONG + SHORT"
+        '4H CISD -> '
+        '15M SWING STRUCTURE -> '
+        'PULLBACK -> '
+        'CONFIRMATION'
     )
 
-    print(
-        "4H CISD -> "
-        "15M SWING STRUCTURE -> "
-        "PULLBACK -> "
-        "CONFIRMATION"
-    )
+    symbols=get_symbols()
 
-    print(
-        "No orders."
-    )
-
-    # ========================================================
-    # SYMBOLS
-    # ========================================================
-
-    symbols = get_symbols()
-
-    print(
-        f"[INFO] selected symbols: "
-        f"{len(symbols)}"
-    )
-
-    # ========================================================
-    # SCAN
-    # ========================================================
-
-    all_signals: List[Signal] = []
+    signals=[]
 
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS
-    ) as executor:
+    ) as ex:
 
-        futures = {
-            executor.submit(
-                analyze_symbol,
-                symbol
-            ): symbol
+        fs={
+            ex.submit(
+                analyze,
+                s
+            ):s
 
-            for symbol in symbols
+            for s in symbols
         }
 
-        done = 0
+        done=0
 
-        for future in as_completed(
-            futures
-        ):
+        for f in as_completed(fs):
 
-            done += 1
+            done+=1
 
             try:
 
-                result = future.result()
-
-                all_signals.extend(
-                    result
+                signals.extend(
+                    f.result()
                 )
 
-            except Exception as exc:
+            except Exception as e:
 
                 print(
-                    f"[WARN] worker error: "
-                    f"{exc}",
+                    f'[WARN] worker: {e}',
                     file=sys.stderr
                 )
 
-            if done % 50 == 0:
+            if done%50==0:
 
                 print(
-                    f"[INFO] progress "
-                    f"{done}/{len(symbols)}"
+                    f'[INFO] progress '
+                    f'{done}/{len(symbols)}'
                 )
 
-    # ========================================================
-    # SORT
-    # ========================================================
-
-    all_signals.sort(
-        key=lambda x: (
+    signals.sort(
+        key=lambda x:(
             -x.score,
             x.symbol,
             x.direction
         )
     )
 
-    # ========================================================
-    # REPORT
-    # ========================================================
-
-    report = build_report(
-        all_signals,
-        len(symbols)
+    now=datetime.now(
+        timezone.utc
+    ).strftime(
+        '%Y-%m-%d %H:%M UTC'
     )
+
+    if not signals:
+
+        report=(
+            f'🔎 '
+            f'4H→15M Structure Scanner v1.6\n'
+            f'{now}\n\n'
+
+            f'스캔 {len(symbols)}개\n'
+            f'🔥 유효 후보 없음\n\n'
+
+            f'조건:\n'
+            f'4H CISD ✓\n'
+            f'15M Swing Structure ✓\n'
+            f'15M Pullback ✓\n'
+            f'15M Confirmation ✓'
+        )
+
+    else:
+
+        report='\n\n'.join(
+            [
+                f'🔎 '
+                f'4H→15M Structure Scanner v1.6\n'
+                f'{now}\n'
+                f'스캔 {len(symbols)}개\n'
+                f'🔥 유효 후보 '
+                f'{len(signals)}개'
+            ]
+            +
+            [
+                format_signal(s)
+                for s in signals[:10]
+            ]
+        )
 
     print(
-        "\n" + report
+        '\n'+report
     )
-
-    # ========================================================
-    # TELEGRAM
-    # ========================================================
 
     try:
 
-        send_telegram(
+        telegram(
             report
         )
 
-    except Exception as exc:
+    except Exception as e:
 
         print(
-            f"[WARN] Telegram failed: "
-            f"{exc}",
+            f'[WARN] Telegram failed: {e}',
             file=sys.stderr
         )
 
-    # ========================================================
-    # JSON
-    # ========================================================
-
     with open(
-        "structure_scan_results.json",
-        "w",
-        encoding="utf-8"
+        'structure_scan_results.json',
+        'w',
+        encoding='utf-8'
     ) as f:
 
         json.dump(
             [
-                asdict(signal)
-                for signal in all_signals
+                asdict(s)
+                for s in signals
             ],
             f,
             ensure_ascii=False,
-            indent=2,
+            indent=2
         )
 
-    # ========================================================
-    # FINISH
-    # ========================================================
-
-    elapsed = (
-        time.time()
-        - started
-    )
-
     print(
-        f"\n[INFO] elapsed: "
-        f"{elapsed:.1f}s"
+        f'\n[INFO] elapsed: '
+        f'{time.time()-t:.1f}s'
     )
 
 
-if __name__ == "__main__":
+if __name__=='__main__':
     main()
