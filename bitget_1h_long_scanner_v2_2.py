@@ -1,5 +1,6 @@
 import time
 import requests
+import os
 import pandas as pd
 
 BASE = "https://api.bitget.com"
@@ -249,7 +250,50 @@ def main():
     print("※ 분류/점수/가격은 후보 선별용 참고값이며 매매 신호가 아닙니다.")
     print("※ 손절/목표가는 기술적 기준값이며 실제 체결 가격을 보장하지 않습니다.")
     print("※ 자동 주문 기능은 없습니다.")
+    telegram_send(out)
+    
+    def telegram_send(out):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
+    if not token or not chat_id:
+        print("⚠️ Telegram Secret이 없습니다.")
+        return
 
+    rows = out.head(10)
+
+    lines = [
+        "🔥 BITGET 1H / 4H LONG CANDIDATES v2.2",
+        "",
+    ]
+
+    for _, r in rows.iterrows():
+        lines.append(
+            f"{r['symbol']} | {r['score']} | {r['classification']}\n"
+            f"{r['setup_reason']}\n"
+            f"현재가: {r['price']:.8g}\n"
+            f"진입기준: {r['entry_reference']:.8g}\n"
+            f"손절기준: {r['reference_stop']:.8g}\n"
+            f"2R 목표: {r['target_1_2R']:.8g}\n"
+            f"손절거리: {r['stop_distance_pct']:.2f}% | "
+            f"RSI: {r['rsi14']:.1f}\n"
+        )
+
+    message = "\n".join(lines)
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    try:
+        requests.post(
+            url,
+            data={
+                "chat_id": chat_id,
+                "text": message,
+            },
+            timeout=10,
+        )
+        print("📨 Telegram 전송 완료")
+    except Exception as e:
+        print(f"⚠️ Telegram 전송 실패: {e}")
 if __name__ == "__main__":
     main()
