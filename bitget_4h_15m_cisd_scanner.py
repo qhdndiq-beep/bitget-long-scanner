@@ -1,38 +1,43 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Structure Scanner v1.8
+Bitget 4H -> 15M CISD Scanner v1.9
 
-DIAGNOSTIC BUILD
+PURPOSE
+-------
+v1.9 is a DIAGNOSTIC VERSION.
 
-FLOW
-----
-4H directional event
-    ↓
-4H CISD
-    ↓
-15M Swing Structure
-    ↓
-15M Structure Break
-    ↓
-15M Pullback
-    ↓
-15M FVG / OB / Structure interaction
-    ↓
-15M Confirmation
-    ↓
-FINAL CANDIDATE
+The previous versions returned:
 
-v1.8
-----
-1. 4H CISD detection widened to actual structure/liquidity behavior
-2. Separates:
-   - 4H directional event
-   - 4H sweep
-   - 4H CISD
-3. Full diagnostic counters
-4. LONG / SHORT counters separately
-5. Does NOT place orders
+4H Directional Event = 0
+4H Liquidity Sweep   = 0
+4H CISD              = 0
+
+So v1.9 temporarily isolates the 4H logic.
+
+It does NOT attempt to generate final trading candidates.
+
+The purpose is to determine exactly where 4H candidates disappear.
+
+DIAGNOSTIC FLOW
+---------------
+
+465 symbols
+    ↓
+① 4H directional event
+    ↓
+② 4H liquidity sweep
+    ↓
+③ 4H CISD
+
+LONG and SHORT are counted separately.
+
+IMPORTANT
+---------
+This is a heuristic scanner.
+It is NOT an exact reproduction of TradingView/LuxAlgo CISD.
+
+No trading orders are placed.
 """
 
 from __future__ import annotations
@@ -43,9 +48,8 @@ import sys
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -57,110 +61,58 @@ from urllib.error import HTTPError, URLError
 # ============================================================
 
 BASE_URL = "https://api.bitget.com"
+
 PRODUCT_TYPE = "USDT-FUTURES"
 
 HISTORY_LIMIT_4H = 200
-HISTORY_LIMIT_15M = 300
 
 MAX_WORKERS = 8
+
 REQUEST_TIMEOUT = 12
 REQUEST_RETRIES = 3
 
 # ------------------------------------------------------------
-# 4H
+# 4H diagnostic window
 # ------------------------------------------------------------
 
-MAX_4H_LOOKBACK = 12
-
-CISD_LOOKBACK = 8
-
-MIN_CISD_BODY_RATIO = 0.25
+MAX_4H_LOOKBACK = 20
 
 # ------------------------------------------------------------
-# 15M
+# Body quality
 # ------------------------------------------------------------
 
-MAX_15M_STRUCTURE_BARS = 96
-
-SWING_LEFT = 2
-SWING_RIGHT = 2
-
-MIN_STRUCTURE_DISTANCE = 2
-
-MIN_STRUCTURE_BODY_RATIO = 0.25
+MIN_DIRECTION_BODY_RATIO = 0.15
+MIN_CISD_BODY_RATIO = 0.20
 
 # ------------------------------------------------------------
-# Pullback
+# Liquidity sweep
 # ------------------------------------------------------------
 
-MAX_PULLBACK_BARS = 32
-
-MIN_PULLBACK_PCT = 0.0003
-
-# ------------------------------------------------------------
-# Confirmation
-# ------------------------------------------------------------
-
-MAX_CONFIRMATION_BARS = 16
-
-MIN_CONFIRMATION_BODY_RATIO = 0.25
-
-# ------------------------------------------------------------
-# Zone
-# ------------------------------------------------------------
-
-ZONE_TOLERANCE_PCT = 0.002
+SWEEP_LOOKBACK = 8
 
 
 # ============================================================
 # DATA
 # ============================================================
 
-@dataclass
 class Candle:
-    ts: int
-    o: float
-    h: float
-    l: float
-    c: float
-    v: float
 
+    def __init__(
+        self,
+        ts: int,
+        o: float,
+        h: float,
+        l: float,
+        c: float,
+        v: float,
+    ):
 
-@dataclass
-class Zone:
-    kind: str
-    direction: str
-    low: float
-    high: float
-    ts: int
-    age_bars: int
-
-
-@dataclass
-class Signal:
-    symbol: str
-    direction: str
-    score: int
-    status: str
-    price: float
-
-    cisd_ts: int
-    cisd_level: float
-
-    structure_ts: int
-    structure_level: float
-
-    pullback_ts: int
-    confirmation_ts: int
-
-    sweep: bool
-    fvg_15m: bool
-    ob_15m: bool
-
-    entry_low: Optional[float]
-    entry_high: Optional[float]
-
-    notes: List[str]
+        self.ts = ts
+        self.o = o
+        self.h = h
+        self.l = l
+        self.c = c
+        self.v = v
 
 
 # ============================================================
@@ -169,15 +121,12 @@ class Signal:
 
 def get_json(
     path: str,
-    params: Dict[str, Any]
+    params: Dict[str, Any],
 ) -> Dict[str, Any]:
 
-    url = (
-        BASE_URL
-        + path
-        + "?"
-        + urlencode(params)
-    )
+    query = urlencode(params)
+
+    url = f"{BASE_URL}{path}?{query}"
 
     last_err = None
 
@@ -189,7 +138,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h15m-scanner-v1.8",
+                        "bitget-4h-15m-cisd-scanner/1.9",
                     "Accept":
                         "application/json",
                 },
@@ -198,16 +147,19 @@ def get_json(
 
             with urlopen(
                 req,
-                timeout=REQUEST_TIMEOUT
-            ) as response:
+                timeout=REQUEST_TIMEOUT,
+            ) as resp:
 
-                data = json.loads(
-                    response.read().decode()
+                body = resp.read().decode(
+                    "utf-8"
                 )
+
+                data = json.loads(body)
 
             if data.get("code") != "00000":
 
                 raise RuntimeError(
+                    f"Bitget API error: "
                     f"{data.get('code')} "
                     f"{data.get('msg')}"
                 )
@@ -229,7 +181,8 @@ def get_json(
             )
 
     raise RuntimeError(
-        f"request failed: {last_err}"
+        f"Request failed: "
+        f"{url} :: {last_err}"
     )
 
 
@@ -242,41 +195,67 @@ def get_symbols() -> List[str]:
     data = get_json(
         "/api/v3/market/instruments",
         {
-            "category": PRODUCT_TYPE
-        }
+            "category": PRODUCT_TYPE,
+        },
     )
 
     symbols = []
 
-    for item in data.get("data", []):
+    total = 0
+    excluded = 0
+
+    for item in data.get(
+        "data",
+        [],
+    ):
+
+        total += 1
 
         symbol = str(
-            item.get("symbol", "")
+            item.get(
+                "symbol",
+                "",
+            )
         ).strip()
 
-        quote = str(
-            item.get("quoteCoin", "")
-        ).upper()
+        quote_coin = str(
+            item.get(
+                "quoteCoin",
+                "",
+            )
+        ).upper().strip()
 
         symbol_type = str(
-            item.get("symbolType", "")
-        ).lower()
+            item.get(
+                "symbolType",
+                "",
+            )
+        ).lower().strip()
 
         contract_type = str(
-            item.get("type", "")
-        ).lower()
+            item.get(
+                "type",
+                "",
+            )
+        ).lower().strip()
 
         status = str(
-            item.get("status", "")
-        ).lower()
+            item.get(
+                "status",
+                "",
+            )
+        ).lower().strip()
 
         is_rwa = str(
-            item.get("isRwa", "YES")
-        ).upper()
+            item.get(
+                "isRwa",
+                "YES",
+            )
+        ).upper().strip()
 
         if (
             symbol.endswith("USDT")
-            and quote == "USDT"
+            and quote_coin == "USDT"
             and symbol_type == "crypto"
             and contract_type == "perpetual"
             and status == "online"
@@ -285,17 +264,29 @@ def get_symbols() -> List[str]:
 
             symbols.append(symbol)
 
-    return sorted(set(symbols))
+        else:
+
+            excluded += 1
+
+    symbols = sorted(
+        set(symbols)
+    )
+
+    print(
+        f"[INFO] instruments: {total} | "
+        f"selected: {len(symbols)} | "
+        f"excluded: {excluded}"
+    )
+
+    return symbols
 
 
 # ============================================================
 # CANDLES
 # ============================================================
 
-def get_candles(
+def get_4h_candles(
     symbol: str,
-    granularity: str,
-    limit: int
 ) -> List[Candle]:
 
     data = get_json(
@@ -303,36 +294,24 @@ def get_candles(
         {
             "symbol": symbol,
             "productType": PRODUCT_TYPE,
-            "granularity": granularity,
-            "limit": limit,
-        }
+            "granularity": "4H",
+            "limit": HISTORY_LIMIT_4H,
+        },
     )
 
     candles = []
 
-    interval = {
-        "4H": 4 * 60 * 60 * 1000,
-        "15m": 15 * 60 * 1000,
-    }[granularity]
-
-    now = int(
-        time.time() * 1000
-    )
-
-    for row in data.get("data", []):
+    for row in data.get(
+        "data",
+        [],
+    ):
 
         if len(row) < 6:
             continue
 
-        ts = int(row[0])
-
-        # Remove unfinished candle.
-        if ts + interval > now:
-            continue
-
         candles.append(
             Candle(
-                ts=ts,
+                ts=int(row[0]),
                 o=float(row[1]),
                 h=float(row[2]),
                 l=float(row[3]),
@@ -345,174 +324,258 @@ def get_candles(
         key=lambda x: x.ts
     )
 
+    # Remove incomplete current candle.
+    now_ms = int(
+        time.time() * 1000
+    )
+
+    interval_ms = (
+        4
+        * 60
+        * 60
+        * 1000
+    )
+
+    candles = [
+        c
+        for c in candles
+        if c.ts + interval_ms <= now_ms
+    ]
+
     return candles
 
 
 # ============================================================
-# HELPERS
+# BASIC HELPERS
 # ============================================================
 
-def bullish(c: Candle) -> bool:
+def bullish(
+    c: Candle,
+) -> bool:
+
     return c.c > c.o
 
 
-def bearish(c: Candle) -> bool:
+def bearish(
+    c: Candle,
+) -> bool:
+
     return c.c < c.o
 
 
-def body_ratio(c: Candle) -> float:
-
-    rng = max(
-        c.h - c.l,
-        1e-12
-    )
+def body_size(
+    c: Candle,
+) -> float:
 
     return abs(
         c.c - c.o
-    ) / rng
+    )
+
+
+def candle_range(
+    c: Candle,
+) -> float:
+
+    return max(
+        c.h - c.l,
+        1e-12,
+    )
+
+
+def body_ratio(
+    c: Candle,
+) -> float:
+
+    return (
+        body_size(c)
+        /
+        candle_range(c)
+    )
 
 
 # ============================================================
-# SWINGS
+# ① DIRECTIONAL EVENT
 # ============================================================
 
-def is_swing_high(
+def find_directional_events(
     candles: List[Candle],
-    i: int
-) -> bool:
+) -> Dict[str, Optional[Dict[str, Any]]]:
 
-    if (
-        i < SWING_LEFT
-        or
-        i + SWING_RIGHT >= len(candles)
-    ):
-        return False
+    """
+    Very broad first-stage filter.
 
-    h = candles[i].h
+    LONG:
+        Recent bullish 4H candle.
 
-    for j in range(
-        i - SWING_LEFT,
-        i
-    ):
+    SHORT:
+        Recent bearish 4H candle.
 
-        if h < candles[j].h:
-            return False
+    This stage is intentionally loose.
 
-    for j in range(
-        i + 1,
-        i + SWING_RIGHT + 1
-    ):
+    We want to know whether the scanner is
+    seeing normal directional movement at all.
+    """
 
-        if h < candles[j].h:
-            return False
+    result = {
+        "LONG": None,
+        "SHORT": None,
+    }
 
-    return True
-
-
-def is_swing_low(
-    candles: List[Candle],
-    i: int
-) -> bool:
-
-    if (
-        i < SWING_LEFT
-        or
-        i + SWING_RIGHT >= len(candles)
-    ):
-        return False
-
-    l = candles[i].l
-
-    for j in range(
-        i - SWING_LEFT,
-        i
-    ):
-
-        if l > candles[j].l:
-            return False
-
-    for j in range(
-        i + 1,
-        i + SWING_RIGHT + 1
-    ):
-
-        if l > candles[j].l:
-            return False
-
-    return True
-
-
-# ============================================================
-# 4H SWEEP
-# ============================================================
-
-def find_4h_sweep(
-    candles: List[Candle],
-    direction: str
-) -> Optional[Dict[str, Any]]:
+    if len(candles) < 5:
+        return result
 
     end = len(candles) - 1
 
     start = max(
-        3,
-        end - MAX_4H_LOOKBACK
+        1,
+        end - MAX_4H_LOOKBACK + 1,
     )
 
     for i in range(
         end,
         start - 1,
-        -1
+        -1,
     ):
 
-        cur = candles[i]
+        c = candles[i]
 
-        left_start = max(
+        ratio = body_ratio(c)
+
+        if (
+            bullish(c)
+            and
+            ratio >= MIN_DIRECTION_BODY_RATIO
+            and
+            result["LONG"] is None
+        ):
+
+            result["LONG"] = {
+                "index": i,
+                "ts": c.ts,
+                "level": c.h,
+            }
+
+        if (
+            bearish(c)
+            and
+            ratio >= MIN_DIRECTION_BODY_RATIO
+            and
+            result["SHORT"] is None
+        ):
+
+            result["SHORT"] = {
+                "index": i,
+                "ts": c.ts,
+                "level": c.l,
+            }
+
+        if (
+            result["LONG"] is not None
+            and
+            result["SHORT"] is not None
+        ):
+
+            break
+
+    return result
+
+
+# ============================================================
+# ② LIQUIDITY SWEEP
+# ============================================================
+
+def find_liquidity_sweep(
+    candles: List[Candle],
+    direction: str,
+) -> Optional[Dict[str, Any]]:
+
+    """
+    LONG sweep:
+
+        Current candle takes a previous low
+        and closes back above that low.
+
+    SHORT sweep:
+
+        Current candle takes a previous high
+        and closes back below that high.
+
+    This is deliberately broad in v1.9.
+    """
+
+    if len(candles) < 12:
+        return None
+
+    end = len(candles) - 1
+
+    start = max(
+        SWEEP_LOOKBACK + 1,
+        end - MAX_4H_LOOKBACK + 1,
+    )
+
+    for i in range(
+        end,
+        start - 1,
+        -1,
+    ):
+
+        current = candles[i]
+
+        previous_start = max(
             0,
-            i - CISD_LOOKBACK
+            i - SWEEP_LOOKBACK,
         )
 
         previous = candles[
-            left_start:i
+            previous_start:i
         ]
 
-        if len(previous) < 3:
+        if not previous:
             continue
+
+        # ----------------------------------------------------
+        # LONG
+        # ----------------------------------------------------
 
         if direction == "LONG":
 
             prior_low = min(
-                c.l for c in previous
+                c.l
+                for c in previous
             )
 
-            # Sweep below liquidity,
-            # then recover above it.
             if (
-                cur.l < prior_low
+                current.l < prior_low
                 and
-                cur.c > prior_low
+                current.c > prior_low
             ):
 
                 return {
                     "index": i,
-                    "ts": cur.ts,
+                    "ts": current.ts,
                     "level": prior_low,
                 }
+
+        # ----------------------------------------------------
+        # SHORT
+        # ----------------------------------------------------
 
         else:
 
             prior_high = max(
-                c.h for c in previous
+                c.h
+                for c in previous
             )
 
             if (
-                cur.h > prior_high
+                current.h > prior_high
                 and
-                cur.c < prior_high
+                current.c < prior_high
             ):
 
                 return {
                     "index": i,
-                    "ts": cur.ts,
+                    "ts": current.ts,
                     "level": prior_high,
                 }
 
@@ -520,13 +583,35 @@ def find_4h_sweep(
 
 
 # ============================================================
-# 4H CISD
+# ③ CISD
 # ============================================================
 
-def find_4h_cisd(
+def find_cisd(
     candles: List[Candle],
-    direction: str
+    direction: str,
 ) -> Optional[Dict[str, Any]]:
+
+    """
+    v1.9 CISD diagnostic.
+
+    We deliberately separate:
+
+        direction
+        sweep
+        CISD
+
+    CISD definition used here:
+
+    LONG:
+        bullish candle body closes above
+        the previous bearish candle high.
+
+    SHORT:
+        bearish candle body closes below
+        the previous bullish candle low.
+
+    This is still heuristic.
+    """
 
     if len(candles) < 20:
         return None
@@ -534,837 +619,230 @@ def find_4h_cisd(
     end = len(candles) - 1
 
     start = max(
-        3,
-        end - MAX_4H_LOOKBACK
+        2,
+        end - MAX_4H_LOOKBACK + 1,
     )
-
-    # --------------------------------------------------------
-    # Look for a body-close structure shift.
-    # --------------------------------------------------------
 
     for i in range(
         end,
         start - 1,
-        -1
+        -1,
     ):
 
-        cur = candles[i]
-
-        left_start = max(
-            0,
-            i - CISD_LOOKBACK
-        )
-
-        previous = candles[
-            left_start:i
-        ]
-
-        if len(previous) < 3:
-            continue
+        current = candles[i]
+        previous = candles[i - 1]
 
         if (
-            body_ratio(cur)
+            body_ratio(current)
             < MIN_CISD_BODY_RATIO
         ):
             continue
 
+        # ----------------------------------------------------
+        # LONG CISD
+        # ----------------------------------------------------
+
         if direction == "LONG":
 
-            reference_high = max(
-                c.h for c in previous
-            )
+            if not bullish(current):
+                continue
 
-            if (
-                bullish(cur)
-                and
-                cur.c > reference_high
-            ):
+            if not bearish(previous):
+                continue
 
-                return {
-                    "index": i,
-                    "ts": cur.ts,
-                    "level": reference_high,
-                }
+            if current.c <= previous.h:
+                continue
+
+            return {
+                "index": i,
+                "ts": current.ts,
+                "level": previous.h,
+            }
+
+        # ----------------------------------------------------
+        # SHORT CISD
+        # ----------------------------------------------------
 
         else:
 
-            reference_low = min(
-                c.l for c in previous
-            )
+            if not bearish(current):
+                continue
 
-            if (
-                bearish(cur)
-                and
-                cur.c < reference_low
-            ):
+            if not bullish(previous):
+                continue
 
-                return {
-                    "index": i,
-                    "ts": cur.ts,
-                    "level": reference_low,
-                }
+            if current.c >= previous.l:
+                continue
+
+            return {
+                "index": i,
+                "ts": current.ts,
+                "level": previous.l,
+            }
 
     return None
 
 
 # ============================================================
-# 15M STRUCTURE
+# SYMBOL DIAGNOSTIC
 # ============================================================
 
-def find_structure(
-    candles: List[Candle],
-    direction: str,
-    start: int
-) -> Optional[Dict[str, Any]]:
+def diagnose_symbol(
+    symbol: str,
+) -> Dict[str, Any]:
 
-    end = min(
-        len(candles) - 1,
-        start + MAX_15M_STRUCTURE_BARS
-    )
+    result = {
+        "symbol": symbol,
 
-    if start >= end:
-        return None
+        "direction_long": False,
+        "direction_short": False,
 
-    for break_i in range(
-        start,
-        end + 1
-    ):
+        "sweep_long": False,
+        "sweep_short": False,
 
-        cur = candles[break_i]
+        "cisd_long": False,
+        "cisd_short": False,
 
-        if (
-            body_ratio(cur)
-            < MIN_STRUCTURE_BODY_RATIO
-        ):
-            continue
+        "direction_long_data": None,
+        "direction_short_data": None,
 
-        if direction == "LONG":
+        "sweep_long_data": None,
+        "sweep_short_data": None,
 
-            swings = []
+        "cisd_long_data": None,
+        "cisd_short_data": None,
 
-            for j in range(
-                max(SWING_LEFT, start),
-                break_i - SWING_RIGHT
-            ):
-
-                if is_swing_high(
-                    candles,
-                    j
-                ):
-
-                    swings.append(j)
-
-            if not swings:
-                continue
-
-            swing_i = swings[-1]
-
-            if (
-                break_i - swing_i
-                < MIN_STRUCTURE_DISTANCE
-            ):
-                continue
-
-            level = candles[
-                swing_i
-            ].h
-
-            if (
-                bullish(cur)
-                and
-                cur.c > level
-            ):
-
-                return {
-                    "index": break_i,
-                    "ts": cur.ts,
-                    "level": level,
-                }
-
-        else:
-
-            swings = []
-
-            for j in range(
-                max(SWING_LEFT, start),
-                break_i - SWING_RIGHT
-            ):
-
-                if is_swing_low(
-                    candles,
-                    j
-                ):
-
-                    swings.append(j)
-
-            if not swings:
-                continue
-
-            swing_i = swings[-1]
-
-            if (
-                break_i - swing_i
-                < MIN_STRUCTURE_DISTANCE
-            ):
-                continue
-
-            level = candles[
-                swing_i
-            ].l
-
-            if (
-                bearish(cur)
-                and
-                cur.c < level
-            ):
-
-                return {
-                    "index": break_i,
-                    "ts": cur.ts,
-                    "level": level,
-                }
-
-    return None
-
-
-# ============================================================
-# PULLBACK
-# ============================================================
-
-def find_pullback(
-    candles: List[Candle],
-    direction: str,
-    structure: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-
-    start = (
-        structure["index"] + 1
-    )
-
-    end = min(
-        len(candles) - 1,
-        structure["index"]
-        + MAX_PULLBACK_BARS
-    )
-
-    level = structure["level"]
-
-    for i in range(
-        start,
-        end + 1
-    ):
-
-        c = candles[i]
-
-        if direction == "LONG":
-
-            if (
-                c.l <= level
-                and
-                c.c >= level
-                and
-                (
-                    level - c.l
-                )
-                >=
-                level * MIN_PULLBACK_PCT
-            ):
-
-                return {
-                    "index": i,
-                    "ts": c.ts,
-                }
-
-        else:
-
-            if (
-                c.h >= level
-                and
-                c.c <= level
-                and
-                (
-                    c.h - level
-                )
-                >=
-                level * MIN_PULLBACK_PCT
-            ):
-
-                return {
-                    "index": i,
-                    "ts": c.ts,
-                }
-
-    return None
-
-
-# ============================================================
-# CONFIRMATION
-# ============================================================
-
-def find_confirmation(
-    candles: List[Candle],
-    direction: str,
-    pullback: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-
-    start = (
-        pullback["index"] + 1
-    )
-
-    end = min(
-        len(candles) - 1,
-        pullback["index"]
-        + MAX_CONFIRMATION_BARS
-    )
-
-    for i in range(
-        start,
-        end + 1
-    ):
-
-        cur = candles[i]
-        prev = candles[i - 1]
-
-        if (
-            body_ratio(cur)
-            < MIN_CONFIRMATION_BODY_RATIO
-        ):
-            continue
-
-        if direction == "LONG":
-
-            if (
-                bullish(cur)
-                and
-                cur.c > prev.h
-            ):
-
-                return {
-                    "index": i,
-                    "ts": cur.ts,
-                }
-
-        else:
-
-            if (
-                bearish(cur)
-                and
-                cur.c < prev.l
-            ):
-
-                return {
-                    "index": i,
-                    "ts": cur.ts,
-                }
-
-    return None
-
-
-# ============================================================
-# FVG / OB
-# ============================================================
-
-def find_fvg_ob(
-    candles: List[Candle],
-    direction: str
-) -> Tuple[
-    List[Zone],
-    List[Zone]
-]:
-
-    fvgs = []
-    obs = []
-
-    for i in range(
-        2,
-        len(candles)
-    ):
-
-        a = candles[i - 2]
-        c = candles[i]
-
-        if (
-            direction == "LONG"
-            and
-            a.h < c.l
-        ):
-
-            fvgs.append(
-                Zone(
-                    kind="FVG",
-                    direction=direction,
-                    low=a.h,
-                    high=c.l,
-                    ts=c.ts,
-                    age_bars=
-                        len(candles)
-                        - 1 - i
-                )
-            )
-
-        elif (
-            direction == "SHORT"
-            and
-            a.l > c.h
-        ):
-
-            fvgs.append(
-                Zone(
-                    kind="FVG",
-                    direction=direction,
-                    low=c.h,
-                    high=a.l,
-                    ts=c.ts,
-                    age_bars=
-                        len(candles)
-                        - 1 - i
-                )
-            )
-
-    for i in range(
-        0,
-        len(candles) - 1
-    ):
-
-        cur = candles[i]
-        nxt = candles[i + 1]
-
-        if (
-            direction == "LONG"
-            and
-            bearish(cur)
-            and
-            bullish(nxt)
-            and
-            nxt.c > cur.h
-        ):
-
-            obs.append(
-                Zone(
-                    kind="OB",
-                    direction=direction,
-                    low=cur.l,
-                    high=cur.o,
-                    ts=cur.ts,
-                    age_bars=
-                        len(candles)
-                        - 1 - i
-                )
-            )
-
-        elif (
-            direction == "SHORT"
-            and
-            bullish(cur)
-            and
-            bearish(nxt)
-            and
-            nxt.c < cur.l
-        ):
-
-            obs.append(
-                Zone(
-                    kind="OB",
-                    direction=direction,
-                    low=cur.o,
-                    high=cur.h,
-                    ts=cur.ts,
-                    age_bars=
-                        len(candles)
-                        - 1 - i
-                )
-            )
-
-    return fvgs, obs
-
-
-def zone_hit(
-    candle: Candle,
-    zone: Zone
-) -> bool:
-
-    tol = max(
-        (
-            candle.h
-            -
-            candle.l
-        ),
-        zone.high - zone.low,
-        candle.c * ZONE_TOLERANCE_PCT
-    )
-
-    return (
-        candle.h >= zone.low - tol
-        and
-        candle.l <= zone.high + tol
-    )
-
-
-# ============================================================
-# SYMBOL ANALYSIS
-# ============================================================
-
-def analyze_symbol(
-    symbol: str
-) -> Tuple[
-    List[Signal],
-    Dict[str, int]
-]:
-
-    counters = {
-        "4h_directional": 0,
-        "4h_sweep": 0,
-        "4h_cisd": 0,
-        "15m_structure": 0,
-        "15m_break": 0,
-        "15m_pullback": 0,
-        "15m_zone": 0,
-        "15m_confirmation": 0,
-
-        "long_4h_directional": 0,
-        "short_4h_directional": 0,
-
-        "long_4h_sweep": 0,
-        "short_4h_sweep": 0,
-
-        "long_4h_cisd": 0,
-        "short_4h_cisd": 0,
-
-        "long_structure": 0,
-        "short_structure": 0,
-
-        "long_pullback": 0,
-        "short_pullback": 0,
-
-        "long_zone": 0,
-        "short_zone": 0,
-
-        "long_confirmation": 0,
-        "short_confirmation": 0,
-
-        "long_final": 0,
-        "short_final": 0,
+        "error": None,
     }
-
-    signals = []
 
     try:
 
-        c4 = get_candles(
-            symbol,
-            "4H",
-            HISTORY_LIMIT_4H
+        candles = get_4h_candles(
+            symbol
         )
 
-        c15 = get_candles(
-            symbol,
-            "15m",
-            HISTORY_LIMIT_15M
+        if len(candles) < 30:
+
+            return result
+
+        # ====================================================
+        # ① DIRECTION
+        # ====================================================
+
+        directions = (
+            find_directional_events(
+                candles
+            )
         )
 
-        if (
-            len(c4) < 30
-            or
-            len(c15) < 80
-        ):
+        if directions["LONG"]:
 
-            return signals, counters
+            result[
+                "direction_long"
+            ] = True
 
-        for direction in (
-            "LONG",
-            "SHORT"
-        ):
+            result[
+                "direction_long_data"
+            ] = directions["LONG"]
 
-            # =================================================
-            # 1. DIRECTIONAL EVENT
-            # =================================================
+        if directions["SHORT"]:
 
-            cisd = find_4h_cisd(
-                c4,
-                direction
+            result[
+                "direction_short"
+            ] = True
+
+            result[
+                "direction_short_data"
+            ] = directions["SHORT"]
+
+        # ====================================================
+        # ② SWEEP
+        # ====================================================
+
+        sweep_long = (
+            find_liquidity_sweep(
+                candles,
+                "LONG",
             )
+        )
 
-            if cisd:
-
-                counters[
-                    "4h_directional"
-                ] += 1
-
-                counters[
-                    f"{direction.lower()}_4h_directional"
-                ] += 1
-
-            else:
-                continue
-
-            # =================================================
-            # 2. SWEEP
-            # =================================================
-
-            sweep = find_4h_sweep(
-                c4,
-                direction
+        sweep_short = (
+            find_liquidity_sweep(
+                candles,
+                "SHORT",
             )
+        )
 
-            if sweep:
+        if sweep_long:
 
-                counters[
-                    "4h_sweep"
-                ] += 1
+            result[
+                "sweep_long"
+            ] = True
 
-                counters[
-                    f"{direction.lower()}_4h_sweep"
-                ] += 1
+            result[
+                "sweep_long_data"
+            ] = sweep_long
 
-            # =================================================
-            # 3. CISD
-            # =================================================
+        if sweep_short:
 
-            # v1.8 intentionally allows CISD
-            # with OR without sweep.
-            #
-            # This is important because a sweep is
-            # supporting evidence, not mandatory.
+            result[
+                "sweep_short"
+            ] = True
 
-            counters[
-                "4h_cisd"
-            ] += 1
+            result[
+                "sweep_short_data"
+            ] = sweep_short
 
-            counters[
-                f"{direction.lower()}_4h_cisd"
-            ] += 1
+        # ====================================================
+        # ③ CISD
+        # ====================================================
 
-            # =================================================
-            # 4. 15M START
-            # =================================================
-
-            start15 = next(
-                (
-                    i
-                    for i, c in enumerate(c15)
-                    if c.ts > cisd["ts"]
-                ),
-                len(c15)
+        cisd_long = (
+            find_cisd(
+                candles,
+                "LONG",
             )
+        )
 
-            if (
-                start15
-                >=
-                len(c15) - 10
-            ):
-                continue
-
-            # =================================================
-            # 5. STRUCTURE
-            # =================================================
-
-            structure = find_structure(
-                c15,
-                direction,
-                start15
+        cisd_short = (
+            find_cisd(
+                candles,
+                "SHORT",
             )
+        )
 
-            if not structure:
-                continue
+        if cisd_long:
 
-            counters[
-                "15m_structure"
-            ] += 1
+            result[
+                "cisd_long"
+            ] = True
 
-            counters[
-                f"{direction.lower()}_structure"
-            ] += 1
+            result[
+                "cisd_long_data"
+            ] = cisd_long
 
-            counters[
-                "15m_break"
-            ] += 1
+        if cisd_short:
 
-            # =================================================
-            # 6. PULLBACK
-            # =================================================
+            result[
+                "cisd_short"
+            ] = True
 
-            pullback = find_pullback(
-                c15,
-                direction,
-                structure
-            )
+            result[
+                "cisd_short_data"
+            ] = cisd_short
 
-            if not pullback:
-                continue
-
-            counters[
-                "15m_pullback"
-            ] += 1
-
-            counters[
-                f"{direction.lower()}_pullback"
-            ] += 1
-
-            # =================================================
-            # 7. ZONE
-            # =================================================
-
-            relevant = c15[
-                structure["index"]:
-                pullback["index"] + 1
-            ]
-
-            fvgs, obs = find_fvg_ob(
-                relevant,
-                direction
-            )
-
-            pb_candle = c15[
-                pullback["index"]
-            ]
-
-            fvg_hit = any(
-                zone_hit(
-                    pb_candle,
-                    z
-                )
-                for z in fvgs
-            )
-
-            ob_hit = any(
-                zone_hit(
-                    pb_candle,
-                    z
-                )
-                for z in obs
-            )
-
-            # Zone is supportive, not mandatory.
-            if (
-                fvg_hit
-                or
-                ob_hit
-            ):
-
-                counters[
-                    "15m_zone"
-                ] += 1
-
-                counters[
-                    f"{direction.lower()}_zone"
-                ] += 1
-
-            # =================================================
-            # 8. CONFIRMATION
-            # =================================================
-
-            confirmation = find_confirmation(
-                c15,
-                direction,
-                pullback
-            )
-
-            if not confirmation:
-                continue
-
-            counters[
-                "15m_confirmation"
-            ] += 1
-
-            counters[
-                f"{direction.lower()}_confirmation"
-            ] += 1
-
-            # =================================================
-            # 9. SCORE
-            # =================================================
-
-            score = 70
-
-            notes = [
-                "4H CISD",
-                "15M swing structure break",
-                "15M pullback",
-                "15M confirmation",
-            ]
-
-            if sweep:
-
-                score += 7
-
-                notes.append(
-                    "4H liquidity sweep"
-                )
-
-            if fvg_hit:
-
-                score += 5
-
-                notes.append(
-                    "15M FVG interaction"
-                )
-
-            if ob_hit:
-
-                score += 5
-
-                notes.append(
-                    "15M OB interaction"
-                )
-
-            score = min(
-                100,
-                score
-            )
-
-            # =================================================
-            # 10. FINAL
-            # =================================================
-
-            counters[
-                f"{direction.lower()}_final"
-            ] += 1
-
-            signals.append(
-                Signal(
-                    symbol=symbol,
-                    direction=direction,
-                    score=score,
-                    status="ENTRY_CANDIDATE",
-                    price=c15[-1].c,
-
-                    cisd_ts=cisd["ts"],
-                    cisd_level=cisd["level"],
-
-                    structure_ts=
-                        structure["ts"],
-                    structure_level=
-                        structure["level"],
-
-                    pullback_ts=
-                        pullback["ts"],
-
-                    confirmation_ts=
-                        confirmation["ts"],
-
-                    sweep=bool(sweep),
-
-                    fvg_15m=fvg_hit,
-                    ob_15m=ob_hit,
-
-                    entry_low=
-                        structure["level"],
-
-                    entry_high=
-                        structure["level"],
-
-                    notes=notes,
-                )
-            )
+        return result
 
     except Exception as exc:
 
+        result["error"] = str(exc)
+
         print(
             f"[WARN] {symbol}: {exc}",
-            file=sys.stderr
+            file=sys.stderr,
         )
 
-    return signals, counters
+        return result
 
 
 # ============================================================
@@ -1372,9 +850,8 @@ def analyze_symbol(
 # ============================================================
 
 def build_report(
-    signals: List[Signal],
-    counters: Dict[str, int],
-    symbol_count: int
+    diagnostics: List[Dict[str, Any]],
+    symbol_count: int,
 ) -> str:
 
     now = datetime.now(
@@ -1383,172 +860,227 @@ def build_report(
         "%Y-%m-%d %H:%M UTC"
     )
 
-    signals.sort(
-        key=lambda x: (
-            -x.score,
-            x.symbol
+    # --------------------------------------------------------
+    # COUNTS
+    # --------------------------------------------------------
+
+    direction_long = sum(
+        1
+        for x in diagnostics
+        if x["direction_long"]
+    )
+
+    direction_short = sum(
+        1
+        for x in diagnostics
+        if x["direction_short"]
+    )
+
+    sweep_long = sum(
+        1
+        for x in diagnostics
+        if x["sweep_long"]
+    )
+
+    sweep_short = sum(
+        1
+        for x in diagnostics
+        if x["sweep_short"]
+    )
+
+    cisd_long = sum(
+        1
+        for x in diagnostics
+        if x["cisd_long"]
+    )
+
+    cisd_short = sum(
+        1
+        for x in diagnostics
+        if x["cisd_short"]
+    )
+
+    errors = sum(
+        1
+        for x in diagnostics
+        if x["error"]
+    )
+
+    # --------------------------------------------------------
+    # FINAL CISD
+    # --------------------------------------------------------
+
+    final_long = [
+        x
+        for x in diagnostics
+        if x["cisd_long"]
+    ]
+
+    final_short = [
+        x
+        for x in diagnostics
+        if x["cisd_short"]
+    ]
+
+    # --------------------------------------------------------
+    # REPORT
+    # --------------------------------------------------------
+
+    lines = []
+
+    lines.append(
+        "🔎 "
+        "4H→15M Structure Scanner v1.9"
+    )
+
+    lines.append(
+        now
+    )
+
+    lines.append("")
+
+    lines.append(
+        f"스캔 {symbol_count}개"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    lines.append(
+        "🔬 v1.9 4H DIAGNOSTIC"
+    )
+
+    lines.append(
+        "━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "① 4H 방향성 이벤트"
+    )
+
+    lines.append(
+        f"   └ LONG  : {direction_long}"
+    )
+
+    lines.append(
+        f"   └ SHORT : {direction_short}"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "② 4H Liquidity Sweep"
+    )
+
+    lines.append(
+        f"   └ LONG  : {sweep_long}"
+    )
+
+    lines.append(
+        f"   └ SHORT : {sweep_short}"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "③ 4H CISD"
+    )
+
+    lines.append(
+        f"   └ LONG  : {cisd_long}"
+    )
+
+    lines.append(
+        f"   └ SHORT : {cisd_short}"
+    )
+
+    lines.append("")
+
+    lines.append(
+        f"⚠️ API/분석 오류 : {errors}"
+    )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # CISD SYMBOLS
+    # --------------------------------------------------------
+
+    if final_long:
+
+        lines.append(
+            "🟢 LONG CISD 후보"
         )
-    )
 
-    text = []
+        for x in final_long[:10]:
 
-    text.append(
-        "🔎 4H→15M Structure Scanner v1.8"
-    )
+            data = (
+                x["cisd_long_data"]
+            )
 
-    text.append(now)
+            lines.append(
+                f"   {x['symbol']} | "
+                f"level {data['level']}"
+            )
 
-    text.append(
-        f"\n스캔 {symbol_count}개"
-    )
+        lines.append("")
 
-    text.append(
-        "\n━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    if final_short:
 
-    text.append(
-        "🔬 v1.8 DIAGNOSTIC"
-    )
+        lines.append(
+            "🔴 SHORT CISD 후보"
+        )
 
-    text.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
+        for x in final_short[:10]:
 
-    text.append(
-        f"① 4H 방향성 이벤트 : "
-        f"{counters['4h_directional']}\n"
-        f"   └ LONG  : "
-        f"{counters['long_4h_directional']}\n"
-        f"   └ SHORT : "
-        f"{counters['short_4h_directional']}"
-    )
+            data = (
+                x["cisd_short_data"]
+            )
 
-    text.append(
-        f"② 4H Liquidity Sweep : "
-        f"{counters['4h_sweep']}\n"
-        f"   └ LONG  : "
-        f"{counters['long_4h_sweep']}\n"
-        f"   └ SHORT : "
-        f"{counters['short_4h_sweep']}"
-    )
+            lines.append(
+                f"   {x['symbol']} | "
+                f"level {data['level']}"
+            )
 
-    text.append(
-        f"③ 4H CISD 통과 : "
-        f"{counters['4h_cisd']}\n"
-        f"   └ LONG  : "
-        f"{counters['long_4h_cisd']}\n"
-        f"   └ SHORT : "
-        f"{counters['short_4h_cisd']}"
-    )
+        lines.append("")
 
-    text.append(
-        f"④ 15M Structure : "
-        f"{counters['15m_structure']}\n"
-        f"   └ LONG  : "
-        f"{counters['long_structure']}\n"
-        f"   └ SHORT : "
-        f"{counters['short_structure']}"
-    )
+    # --------------------------------------------------------
+    # FINAL
+    # --------------------------------------------------------
 
-    text.append(
-        f"⑤ 15M Pullback : "
-        f"{counters['15m_pullback']}\n"
-        f"   └ LONG  : "
-        f"{counters['long_pullback']}\n"
-        f"   └ SHORT : "
-        f"{counters['short_pullback']}"
-    )
+    if (
+        cisd_long == 0
+        and
+        cisd_short == 0
+    ):
 
-    text.append(
-        f"⑥ 15M Zone Interaction : "
-        f"{counters['15m_zone']}\n"
-        f"   └ LONG  : "
-        f"{counters['long_zone']}\n"
-        f"   └ SHORT : "
-        f"{counters['short_zone']}"
-    )
-
-    text.append(
-        f"⑦ 15M Confirmation : "
-        f"{counters['15m_confirmation']}\n"
-        f"   └ LONG  : "
-        f"{counters['long_confirmation']}\n"
-        f"   └ SHORT : "
-        f"{counters['short_confirmation']}"
-    )
-
-    text.append(
-        f"\n🔥 FINAL CANDIDATE : "
-        f"{len(signals)}"
-    )
-
-    text.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    if not signals:
-
-        text.append(
-            "\n⚠️ 현재 최종 후보 없음."
+        lines.append(
+            "🔥 4H CISD 후보 없음"
         )
 
     else:
 
-        text.append("")
+        lines.append(
+            "🔥 4H CISD 후보 발견"
+        )
 
-        for s in signals[:10]:
+    lines.append("")
 
-            icon = (
-                "🟢"
-                if s.direction == "LONG"
-                else "🔴"
-            )
-
-            text.append(
-                f"{icon} {s.symbol} "
-                f"{s.direction} | "
-                f"점수 {s.score}"
-            )
-
-            text.append(
-                f"현재가: {s.price}"
-            )
-
-            text.append(
-                f"4H CISD: "
-                f"{short_ts(s.cisd_ts)}"
-            )
-
-            text.append(
-                f"15M Structure: "
-                f"{short_ts(s.structure_ts)}"
-            )
-
-            text.append(
-                f"15M Pullback: "
-                f"{short_ts(s.pullback_ts)}"
-            )
-
-            text.append(
-                f"15M Confirmation: "
-                f"{short_ts(s.confirmation_ts)}"
-            )
-
-            text.append(
-                " | ".join(s.notes)
-            )
-
-    return "\n".join(text)
-
-
-def short_ts(ms: int) -> str:
-
-    return datetime.fromtimestamp(
-        ms / 1000,
-        tz=timezone.utc
-    ).strftime(
-        "%m-%d %H:%M UTC"
+    lines.append(
+        "※ v1.9는 4H 진단 전용입니다."
     )
+
+    lines.append(
+        "※ 15M Structure/Pullback/"
+        "Confirmation은 아직 실행하지 않습니다."
+    )
+
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -1556,20 +1088,26 @@ def short_ts(ms: int) -> str:
 # ============================================================
 
 def send_telegram(
-    text: str
+    text: str,
 ) -> None:
 
     token = os.getenv(
         "TELEGRAM_BOT_TOKEN",
-        ""
+        "",
     ).strip()
 
     chat_id = os.getenv(
         "TELEGRAM_CHAT_ID",
-        ""
+        "",
     ).strip()
 
     if not token or not chat_id:
+
+        print(
+            "[INFO] Telegram secrets "
+            "are not set."
+        )
+
         return
 
     url = (
@@ -1581,7 +1119,8 @@ def send_telegram(
         {
             "chat_id": chat_id,
             "text": text,
-            "disable_web_page_preview": "true",
+            "disable_web_page_preview":
+                "true",
         }
     ).encode()
 
@@ -1597,29 +1136,48 @@ def send_telegram(
 
     with urlopen(
         req,
-        timeout=REQUEST_TIMEOUT
-    ) as response:
+        timeout=REQUEST_TIMEOUT,
+    ) as resp:
 
-        response.read()
+        resp.read()
 
 
 # ============================================================
 # MAIN
 # ============================================================
 
-def main():
+def main() -> None:
 
     started = time.time()
 
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v1.8\n"
+        " Bitget 4H -> 15M CISD Scanner v1.9\n"
         "============================================\n"
-        "DIAGNOSTIC BUILD\n"
-        "LONG + SHORT\n"
-        "NO ORDERS\n"
     )
+
+    print(
+        "DIAGNOSTIC MODE"
+    )
+
+    print(
+        "4H Direction -> "
+        "Liquidity Sweep -> "
+        "CISD"
+    )
+
+    print(
+        "15M logic is DISABLED."
+    )
+
+    print(
+        "No orders."
+    )
+
+    # ========================================================
+    # SYMBOLS
+    # ========================================================
 
     symbols = get_symbols()
 
@@ -1628,9 +1186,11 @@ def main():
         f"{len(symbols)}"
     )
 
-    all_signals = []
+    # ========================================================
+    # SCAN
+    # ========================================================
 
-    total = {}
+    diagnostics = []
 
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS
@@ -1638,8 +1198,8 @@ def main():
 
         futures = {
             executor.submit(
-                analyze_symbol,
-                symbol
+                diagnose_symbol,
+                symbol,
             ): symbol
             for symbol in symbols
         }
@@ -1654,26 +1214,24 @@ def main():
 
             try:
 
-                signals, counters = (
+                result = (
                     future.result()
                 )
 
-                all_signals.extend(
-                    signals
+                diagnostics.append(
+                    result
                 )
-
-                for key, value in counters.items():
-
-                    total[key] = (
-                        total.get(key, 0)
-                        + value
-                    )
 
             except Exception as exc:
 
+                symbol = futures[
+                    future
+                ]
+
                 print(
-                    f"[WARN] worker: {exc}",
-                    file=sys.stderr
+                    f"[WARN] worker error "
+                    f"{symbol}: {exc}",
+                    file=sys.stderr,
                 )
 
             if done % 50 == 0:
@@ -1683,15 +1241,22 @@ def main():
                     f"{done}/{len(symbols)}"
                 )
 
+    # ========================================================
+    # REPORT
+    # ========================================================
+
     report = build_report(
-        all_signals,
-        total,
-        len(symbols)
+        diagnostics,
+        len(symbols),
     )
 
     print(
         "\n" + report
     )
+
+    # ========================================================
+    # TELEGRAM
+    # ========================================================
 
     try:
 
@@ -1704,28 +1269,38 @@ def main():
         print(
             f"[WARN] Telegram failed: "
             f"{exc}",
-            file=sys.stderr
+            file=sys.stderr,
         )
 
+    # ========================================================
+    # JSON
+    # ========================================================
+
     with open(
-        "structure_scan_results.json",
+        "cisd_v1_9_diagnostic.json",
         "w",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as f:
 
         json.dump(
-            [
-                asdict(x)
-                for x in all_signals
-            ],
+            diagnostics,
             f,
             ensure_ascii=False,
-            indent=2
+            indent=2,
         )
+
+    # ========================================================
+    # FINISH
+    # ========================================================
+
+    elapsed = (
+        time.time()
+        - started
+    )
 
     print(
         f"\n[INFO] elapsed: "
-        f"{time.time() - started:.1f}s"
+        f"{elapsed:.1f}s"
     )
 
 
