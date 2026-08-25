@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Structure Scanner v2.1
+Bitget 4H -> 15M Structure Scanner v2.2
 
 FLOW
 ----
@@ -15,19 +15,18 @@ FLOW
         ↓
 15M STRUCTURE CANDIDATE
 
-v2.1 PURPOSE
--------------
+v2.2 PURPOSE
+------------
 v2.0에서 검증된 4H Sweep -> CISD -> Recency 이벤트를
 15M 실제 Swing Structure Break와 연결한다.
 
-IMPORTANT
----------
-이번 버전에서는 Pullback / FVG / OB / Confirmation을
-아직 최종 조건에 넣지 않는다.
+v2.2에서는 조건을 완화하지 않는다.
 
 목적:
-"4H에서 만들어진 방향성이 15M 구조까지 실제로 연결되는가?"
-를 확인하는 것.
+"왜 4H 이벤트가 15M Structure로 연결되지 않는가?"
+를 정확하게 진단한다.
+
+Pullback / FVG / OB / Confirmation은 아직 사용하지 않는다.
 
 No trading orders are placed.
 """
@@ -71,11 +70,7 @@ REQUEST_RETRIES = 3
 # ============================================================
 
 MAX_4H_EVENT_BARS = 8
-
-# Sweep 이후 CISD가 발생할 수 있는 최대 거리
 MAX_SWEEP_TO_CISD_BARS = 8
-
-# 최근성
 MAX_4H_RECENCY_BARS = 8
 
 
@@ -122,20 +117,6 @@ class Candle:
 
 
 @dataclass
-class Event:
-    symbol: str
-    direction: str
-
-    sweep_ts: int
-    sweep_level: float
-
-    cisd_ts: int
-    cisd_level: float
-
-    recency_bars: int
-
-
-@dataclass
 class StructureCandidate:
     symbol: str
     direction: str
@@ -164,7 +145,6 @@ def get_json(
 ) -> Dict[str, Any]:
 
     query = urlencode(params)
-
     url = f"{BASE_URL}{path}?{query}"
 
     last_err = None
@@ -177,7 +157,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h15m-structure-scanner/2.1",
+                        "bitget-4h15m-structure-scanner/2.2",
                     "Accept":
                         "application/json",
                 },
@@ -190,7 +170,6 @@ def get_json(
             ) as resp:
 
                 body = resp.read().decode("utf-8")
-
                 data = json.loads(body)
 
             if data.get("code") != "00000":
@@ -219,7 +198,8 @@ def get_json(
 
     raise RuntimeError(
         f"Request failed: "
-        f"{url} :: {last_err}"
+        f"{path} "
+        f"{params} :: {last_err}"
     )
 
 
@@ -236,7 +216,7 @@ def get_symbols() -> List[str]:
         },
     )
 
-    symbols: List[str] = []
+    symbols = []
 
     total = 0
     excluded = 0
@@ -315,7 +295,7 @@ def get_candles(
         },
     )
 
-    candles: List[Candle] = []
+    candles = []
 
     for row in data.get("data", []):
 
@@ -349,8 +329,10 @@ def get_candles(
             15 * 60 * 1000,
     }[granularity]
 
+    # 아직 진행 중인 봉 제거
     candles = [
-        x for x in candles
+        x
+        for x in candles
         if x.ts + interval_ms <= now_ms
     ]
 
@@ -378,8 +360,7 @@ def body_ratio(c: Candle) -> float:
 
     return (
         abs(c.c - c.o)
-        /
-        candle_range
+        / candle_range
     )
 
 
@@ -417,19 +398,13 @@ def find_latest_sweep(
         if not previous:
             continue
 
-        # ----------------------------------------------------
-        # LONG
-        #
-        # Sell-side liquidity sweep
-        # Previous lows taken
-        # Then candle closes back above
-        # ----------------------------------------------------
-
+        # LONG:
+        # 이전 저점을 아래로 훑은 후
+        # 다시 그 위에서 마감
         if direction == "LONG":
 
             prior_low = min(
-                c.l
-                for c in previous
+                c.l for c in previous
             )
 
             if (
@@ -444,19 +419,13 @@ def find_latest_sweep(
                     "level": prior_low,
                 }
 
-        # ----------------------------------------------------
-        # SHORT
-        #
-        # Buy-side liquidity sweep
-        # Previous highs taken
-        # Then candle closes back below
-        # ----------------------------------------------------
-
+        # SHORT:
+        # 이전 고점을 위로 훑은 후
+        # 다시 그 아래에서 마감
         else:
 
             prior_high = max(
-                c.h
-                for c in previous
+                c.h for c in previous
             )
 
             if (
@@ -475,7 +444,7 @@ def find_latest_sweep(
 
 
 # ============================================================
-# 4H CISD AFTER SWEEP
+# 4H CISD
 # ============================================================
 
 def find_cisd_after_sweep(
@@ -503,12 +472,7 @@ def find_cisd_after_sweep(
     ):
 
         cur = candles[i]
-
         ref = candles[i - 1]
-
-        # ----------------------------------------------------
-        # LONG
-        # ----------------------------------------------------
 
         if direction == "LONG":
 
@@ -530,10 +494,6 @@ def find_cisd_after_sweep(
                 "ts": cur.ts,
                 "level": ref.h,
             }
-
-        # ----------------------------------------------------
-        # SHORT
-        # ----------------------------------------------------
 
         else:
 
@@ -560,7 +520,7 @@ def find_cisd_after_sweep(
 
 
 # ============================================================
-# 15M SWING
+# 15M SWINGS
 # ============================================================
 
 def is_swing_high(
@@ -656,9 +616,9 @@ def find_structure_break(
     if start_index >= search_end:
         return None
 
-    # --------------------------------------------------------
+    # ========================================================
     # LONG
-    # --------------------------------------------------------
+    # ========================================================
 
     if direction == "LONG":
 
@@ -681,8 +641,6 @@ def find_structure_break(
             ):
                 continue
 
-            # Find newest confirmed swing high
-            # BEFORE the breakout candle.
             swing_end = (
                 break_index
                 - SWING_RIGHT
@@ -717,7 +675,6 @@ def find_structure_break(
                     swing_index
                 ].h
 
-                # BODY CLOSE above structure.
                 if cur.c <= level:
                     continue
 
@@ -737,9 +694,9 @@ def find_structure_break(
                         ].ts,
                 }
 
-    # --------------------------------------------------------
+    # ========================================================
     # SHORT
-    # --------------------------------------------------------
+    # ========================================================
 
     else:
 
@@ -796,7 +753,6 @@ def find_structure_break(
                     swing_index
                 ].l
 
-                # BODY CLOSE below structure.
                 if cur.c >= level:
                     continue
 
@@ -827,7 +783,10 @@ def analyze_symbol(
     symbol: str
 ) -> Dict[str, Any]:
 
-    diagnostic = {
+    result = {
+
+        "symbol": symbol,
+
         "long_event": False,
         "short_event": False,
 
@@ -836,7 +795,14 @@ def analyze_symbol(
 
         "long_candidate": None,
         "short_candidate": None,
+
+        "error_stage": None,
+        "error": None,
     }
+
+    # ========================================================
+    # 4H DATA
+    # ========================================================
 
     try:
 
@@ -846,23 +812,28 @@ def analyze_symbol(
             HISTORY_LIMIT_4H
         )
 
-        c15 = get_candles(
-            symbol,
-            "15m",
-            HISTORY_LIMIT_15M
+    except Exception as exc:
+
+        result["error_stage"] = "4H_CANDLES"
+        result["error"] = str(exc)
+
+        return result
+
+    if len(c4) < 40:
+
+        result["error_stage"] = "4H_DATA_LENGTH"
+
+        result["error"] = (
+            f"4H candles={len(c4)}"
         )
 
-        if (
-            len(c4) < 40
-            or
-            len(c15) < 100
-        ):
+        return result
 
-            return diagnostic
+    # ========================================================
+    # LONG 4H EVENT
+    # ========================================================
 
-        # ====================================================
-        # LONG
-        # ====================================================
+    try:
 
         sweep_long = find_latest_sweep(
             c4,
@@ -888,77 +859,29 @@ def analyze_symbol(
 
                 if recency <= MAX_4H_RECENCY_BARS:
 
-                    diagnostic[
+                    result[
                         "long_event"
                     ] = True
 
-                    # Find first 15M candle
-                    # AFTER the 4H CISD.
-                    start15 = next(
-                        (
-                            i
-                            for i, c
-                            in enumerate(c15)
-                            if c.ts >
-                            cisd_long["ts"]
-                        ),
-                        len(c15)
-                    )
+                    result[
+                        "long_event_data"
+                    ] = {
+                        "sweep": sweep_long,
+                        "cisd": cisd_long,
+                    }
 
-                    if (
-                        start15
-                        <
-                        len(c15) - 10
-                    ):
+    except Exception as exc:
 
-                        structure = (
-                            find_structure_break(
-                                c15,
-                                "LONG",
-                                start15
-                            )
-                        )
+        result["error_stage"] = "4H_LONG_EVENT"
+        result["error"] = str(exc)
 
-                        if structure:
+        return result
 
-                            diagnostic[
-                                "long_structure"
-                            ] = True
+    # ========================================================
+    # SHORT 4H EVENT
+    # ========================================================
 
-                            diagnostic[
-                                "long_candidate"
-                            ] = StructureCandidate(
-                                symbol=symbol,
-                                direction="LONG",
-
-                                sweep_ts=
-                                    sweep_long["ts"],
-
-                                sweep_level=
-                                    sweep_long["level"],
-
-                                cisd_ts=
-                                    cisd_long["ts"],
-
-                                cisd_level=
-                                    cisd_long["level"],
-
-                                structure_ts=
-                                    structure["ts"],
-
-                                structure_level=
-                                    structure["level"],
-
-                                swing_ts=
-                                    structure["swing_ts"],
-
-                                current_price=
-                                    c15[-1].c,
-                            )
-
-        # ====================================================
-        # SHORT
-        # ====================================================
+    try:
 
         sweep_short = find_latest_sweep(
             c4,
@@ -984,78 +907,255 @@ def analyze_symbol(
 
                 if recency <= MAX_4H_RECENCY_BARS:
 
-                    diagnostic[
+                    result[
                         "short_event"
                     ] = True
 
-                    start15 = next(
-                        (
-                            i
-                            for i, c in enumerate(c15)
-                            if c.ts >
-                            cisd_short["ts"]
-                        ),
-                        len(c15)
-                    )
-
-                    if (
-                        start15
-                        <
-                        len(c15) - 10
-                    ):
-
-                        structure = (
-                            find_structure_break(
-                                c15,
-                                "SHORT",
-                                start15
-                            )
-                        )
-
-                        if structure:
-
-                            diagnostic[
-                                "short_structure"
-                            ] = True
-
-                            diagnostic[
-                                "short_candidate"
-                            ] = StructureCandidate(
-                                symbol=symbol,
-                                direction="SHORT",
-
-                                sweep_ts=
-                                    sweep_short["ts"],
-
-                                sweep_level=
-                                    sweep_short["level"],
-
-                                cisd_ts=
-                                    cisd_short["ts"],
-
-                                cisd_level=
-                                    cisd_short["level"],
-
-                                structure_ts=
-                                    structure["ts"],
-
-                                structure_level=
-                                    structure["level"],
-
-                                swing_ts=
-                                    structure["swing_ts"],
-
-                                current_price=
-                                    c15[-1].c,
-                            )
-
-        return diagnostic
+                    result[
+                        "short_event_data"
+                    ] = {
+                        "sweep": sweep_short,
+                        "cisd": cisd_short,
+                    }
 
     except Exception as exc:
 
-        diagnostic["error"] = str(exc)
+        result["error_stage"] = "4H_SHORT_EVENT"
+        result["error"] = str(exc)
 
-        return diagnostic
+        return result
+
+    # ========================================================
+    # IMPORTANT
+    #
+    # 4H EVENT가 하나도 없으면
+    # 15M API를 호출하지 않는다.
+    # ========================================================
+
+    if not (
+        result["long_event"]
+        or
+        result["short_event"]
+    ):
+
+        return result
+
+    # ========================================================
+    # 15M DATA
+    # ========================================================
+
+    try:
+
+        c15 = get_candles(
+            symbol,
+            "15m",
+            HISTORY_LIMIT_15M
+        )
+
+    except Exception as exc:
+
+        result["error_stage"] = "15M_CANDLES"
+        result["error"] = str(exc)
+
+        return result
+
+    if len(c15) < 100:
+
+        result["error_stage"] = "15M_DATA_LENGTH"
+
+        result["error"] = (
+            f"15M candles={len(c15)}"
+        )
+
+        return result
+
+    # ========================================================
+    # LONG 15M STRUCTURE
+    # ========================================================
+
+    if result["long_event"]:
+
+        try:
+
+            cisd_ts = result[
+                "long_event_data"
+            ]["cisd"]["ts"]
+
+            start15 = next(
+                (
+                    i
+                    for i, candle
+                    in enumerate(c15)
+                    if candle.ts > cisd_ts
+                ),
+                len(c15)
+            )
+
+            if (
+                start15
+                <
+                len(c15) - 10
+            ):
+
+                structure = (
+                    find_structure_break(
+                        c15,
+                        "LONG",
+                        start15
+                    )
+                )
+
+                if structure:
+
+                    result[
+                        "long_structure"
+                    ] = True
+
+                    sweep = result[
+                        "long_event_data"
+                    ]["sweep"]
+
+                    cisd = result[
+                        "long_event_data"
+                    ]["cisd"]
+
+                    result[
+                        "long_candidate"
+                    ] = StructureCandidate(
+
+                        symbol=symbol,
+
+                        direction="LONG",
+
+                        sweep_ts=
+                            sweep["ts"],
+
+                        sweep_level=
+                            sweep["level"],
+
+                        cisd_ts=
+                            cisd["ts"],
+
+                        cisd_level=
+                            cisd["level"],
+
+                        structure_ts=
+                            structure["ts"],
+
+                        structure_level=
+                            structure["level"],
+
+                        swing_ts=
+                            structure["swing_ts"],
+
+                        current_price=
+                            c15[-1].c,
+                    )
+
+        except Exception as exc:
+
+            result["error_stage"] = (
+                "15M_LONG_STRUCTURE"
+            )
+
+            result["error"] = str(exc)
+
+            return result
+
+    # ========================================================
+    # SHORT 15M STRUCTURE
+    # ========================================================
+
+    if result["short_event"]:
+
+        try:
+
+            cisd_ts = result[
+                "short_event_data"
+            ]["cisd"]["ts"]
+
+            start15 = next(
+                (
+                    i
+                    for i, candle
+                    in enumerate(c15)
+                    if candle.ts > cisd_ts
+                ),
+                len(c15)
+            )
+
+            if (
+                start15
+                <
+                len(c15) - 10
+            ):
+
+                structure = (
+                    find_structure_break(
+                        c15,
+                        "SHORT",
+                        start15
+                    )
+                )
+
+                if structure:
+
+                    result[
+                        "short_structure"
+                    ] = True
+
+                    sweep = result[
+                        "short_event_data"
+                    ]["sweep"]
+
+                    cisd = result[
+                        "short_event_data"
+                    ]["cisd"]
+
+                    result[
+                        "short_candidate"
+                    ] = StructureCandidate(
+
+                        symbol=symbol,
+
+                        direction="SHORT",
+
+                        sweep_ts=
+                            sweep["ts"],
+
+                        sweep_level=
+                            sweep["level"],
+
+                        cisd_ts=
+                            cisd["ts"],
+
+                        cisd_level=
+                            cisd["level"],
+
+                        structure_ts=
+                            structure["ts"],
+
+                        structure_level=
+                            structure["level"],
+
+                        swing_ts=
+                            structure["swing_ts"],
+
+                        current_price=
+                            c15[-1].c,
+                    )
+
+        except Exception as exc:
+
+            result["error_stage"] = (
+                "15M_SHORT_STRUCTURE"
+            )
+
+            result["error"] = str(exc)
+
+            return result
+
+    return result
 
 
 # ============================================================
@@ -1227,14 +1327,9 @@ def build_report(
         short_structure
     )
 
-    # --------------------------------------------------------
-    # HEADER
-    # --------------------------------------------------------
-
     lines = [
 
-        "🔎 "
-        "4H→15M Structure Scanner v2.1",
+        "🔎 4H→15M Structure Scanner v2.2",
 
         now,
 
@@ -1246,7 +1341,7 @@ def build_report(
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
-        "🔬 v2.1 DIAGNOSTIC",
+        "🔬 v2.2 DIAGNOSTIC",
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
@@ -1273,17 +1368,57 @@ def build_report(
         f"⚠️ API/분석 오류 : "
         f"{errors}",
 
-        "",
-
-        f"🔥 FINAL 4H→15M STRUCTURE "
-        f": {len(candidates)}개",
-
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
-    # --------------------------------------------------------
+    # ========================================================
+    # ERROR DIAGNOSTIC
+    # ========================================================
+
+    error_items = [
+        x
+        for x in diagnostics
+        if x.get("error")
+    ]
+
+    if error_items:
+
+        lines += [
+            "",
+            "🔧 ERROR DIAGNOSTIC",
+            ""
+        ]
+
+        # 같은 오류가 수백 개 반복될 경우
+        # 대표 10개만 표시
+        for item in error_items[:10]:
+
+            lines.append(
+                f"❌ {item.get('symbol')}"
+            )
+
+            lines.append(
+                f"   STEP : "
+                f"{item.get('error_stage')}"
+            )
+
+            lines.append(
+                f"   ERROR: "
+                f"{item.get('error')}"
+            )
+
+            lines.append("")
+
+        if len(error_items) > 10:
+
+            lines.append(
+                f"... 외 "
+                f"{len(error_items) - 10}개"
+            )
+
+    # ========================================================
     # CANDIDATES
-    # --------------------------------------------------------
+    # ========================================================
 
     if candidates:
 
@@ -1319,7 +1454,7 @@ def build_report(
             "",
             "다음 단계:",
             "4H 이벤트 → 15M Structure "
-            "연결 검증 필요",
+            "연결 검증",
         ]
 
     return "\n".join(lines)
@@ -1336,7 +1471,7 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v2.1\n"
+        " Bitget 4H -> 15M Structure Scanner v2.2\n"
         "============================================\n"
     )
 
@@ -1352,6 +1487,10 @@ def main() -> None:
     )
 
     print(
+        "DEBUG MODE: ENABLED"
+    )
+
+    print(
         "No orders."
     )
 
@@ -1359,7 +1498,19 @@ def main() -> None:
     # SYMBOLS
     # ========================================================
 
-    symbols = get_symbols()
+    try:
+
+        symbols = get_symbols()
+
+    except Exception as exc:
+
+        print(
+            f"[FATAL] symbol loading failed: "
+            f"{exc}",
+            file=sys.stderr
+        )
+
+        return
 
     print(
         f"[INFO] selected symbols: "
@@ -1370,9 +1521,7 @@ def main() -> None:
     # SCAN
     # ========================================================
 
-    diagnostics: List[
-        Dict[str, Any]
-    ] = []
+    diagnostics = []
 
     errors = 0
 
@@ -1396,6 +1545,10 @@ def main() -> None:
 
             done += 1
 
+            symbol = futures[
+                future
+            ]
+
             try:
 
                 result = future.result()
@@ -1407,13 +1560,41 @@ def main() -> None:
                 if result.get("error"):
                     errors += 1
 
+                    print(
+                        f"[ERROR] "
+                        f"{symbol} | "
+                        f"{result.get('error_stage')} | "
+                        f"{result.get('error')}",
+                        file=sys.stderr
+                    )
+
             except Exception as exc:
 
                 errors += 1
 
+                diagnostics.append({
+                    "symbol": symbol,
+                    "error_stage":
+                        "WORKER",
+                    "error":
+                        str(exc),
+                    "long_event":
+                        False,
+                    "short_event":
+                        False,
+                    "long_structure":
+                        False,
+                    "short_structure":
+                        False,
+                    "long_candidate":
+                        None,
+                    "short_candidate":
+                        None,
+                })
+
                 print(
-                    f"[WARN] worker error: "
-                    f"{exc}",
+                    f"[ERROR] WORKER | "
+                    f"{symbol} | {exc}",
                     file=sys.stderr
                 )
 
