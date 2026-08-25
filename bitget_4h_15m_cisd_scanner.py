@@ -1,63 +1,35 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M CISD Scanner v2.0
+Bitget 4H -> 15M Structure Scanner v2.1
 
-CORE IDEA
----------
-4H LIQUIDITY SWEEP
+FLOW
+----
+4H Liquidity Sweep
         ↓
 4H CISD
         ↓
-15M STRUCTURE
+4H Recency
         ↓
-15M PULLBACK
+15M Swing Structure Break
         ↓
-15M ZONE
-        ↓
-15M CONFIRMATION
+15M STRUCTURE CANDIDATE
 
-v2.0 CHANGE
------------
-v1.9 calculated:
-
-    Sweep
-    CISD
-
-independently.
-
-That created too many false CISD candidates.
-
-v2.0 requires the correct chronological sequence:
-
-LONG
-----
-1. Confirmed 4H swing low
-2. Price sweeps below that swing low
-3. Sweep candle closes back above the swing low
-4. A later bullish CISD occurs
-5. CISD candle body closes above the latest bearish reference candle high
-
-SHORT
------
-1. Confirmed 4H swing high
-2. Price sweeps above that swing high
-3. Sweep candle closes back below the swing high
-4. A later bearish CISD occurs
-5. CISD candle body closes below the latest bullish reference candle low
+v2.1 PURPOSE
+-------------
+v2.0에서 검증된 4H Sweep -> CISD -> Recency 이벤트를
+15M 실제 Swing Structure Break와 연결한다.
 
 IMPORTANT
 ---------
-This version is still diagnostic.
+이번 버전에서는 Pullback / FVG / OB / Confirmation을
+아직 최종 조건에 넣지 않는다.
 
-15M logic is NOT executed yet.
-
-The purpose is to validate the 4H event definition first.
+목적:
+"4H에서 만들어진 방향성이 15M 구조까지 실제로 연결되는가?"
+를 확인하는 것.
 
 No trading orders are placed.
-
-This is a heuristic scanner.
-It is NOT an exact reproduction of TradingView/LuxAlgo CISD.
 """
 
 from __future__ import annotations
@@ -68,6 +40,7 @@ import sys
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -85,6 +58,7 @@ BASE_URL = "https://api.bitget.com"
 PRODUCT_TYPE = "USDT-FUTURES"
 
 HISTORY_LIMIT_4H = 200
+HISTORY_LIMIT_15M = 300
 
 MAX_WORKERS = 8
 
@@ -93,61 +67,91 @@ REQUEST_RETRIES = 3
 
 
 # ============================================================
-# 4H EVENT CONFIG
+# 4H EVENT
 # ============================================================
 
-# Search recent candles only.
-MAX_EVENT_LOOKBACK = 20
+MAX_4H_EVENT_BARS = 8
 
-# Sweep must happen within this many candles
-# before the CISD.
-MAX_CISD_AFTER_SWEEP = 6
+# Sweep 이후 CISD가 발생할 수 있는 최대 거리
+MAX_SWEEP_TO_CISD_BARS = 8
 
-# Maximum age of final event.
-MAX_FINAL_EVENT_AGE = 8
+# 최근성
+MAX_4H_RECENCY_BARS = 8
 
 
 # ============================================================
-# SWING CONFIG
+# 4H LIQUIDITY
+# ============================================================
+
+LIQUIDITY_LOOKBACK = 8
+
+
+# ============================================================
+# 4H CISD
+# ============================================================
+
+MIN_CISD_BODY_RATIO = 0.30
+
+
+# ============================================================
+# 15M STRUCTURE
 # ============================================================
 
 SWING_LEFT = 2
 SWING_RIGHT = 2
 
-SWING_LOOKBACK = 30
+MAX_15M_STRUCTURE_BARS = 96
 
+MIN_STRUCTURE_DISTANCE = 3
 
-# ============================================================
-# BODY CONFIG
-# ============================================================
-
-MIN_SWEEP_BODY_RATIO = 0.10
-
-MIN_CISD_BODY_RATIO = 0.30
+MIN_STRUCTURE_BODY_RATIO = 0.25
 
 
 # ============================================================
 # DATA
 # ============================================================
 
+@dataclass
 class Candle:
+    ts: int
+    o: float
+    h: float
+    l: float
+    c: float
+    v: float
 
-    def __init__(
-        self,
-        ts: int,
-        o: float,
-        h: float,
-        l: float,
-        c: float,
-        v: float,
-    ):
 
-        self.ts = ts
-        self.o = o
-        self.h = h
-        self.l = l
-        self.c = c
-        self.v = v
+@dataclass
+class Event:
+    symbol: str
+    direction: str
+
+    sweep_ts: int
+    sweep_level: float
+
+    cisd_ts: int
+    cisd_level: float
+
+    recency_bars: int
+
+
+@dataclass
+class StructureCandidate:
+    symbol: str
+    direction: str
+
+    sweep_ts: int
+    sweep_level: float
+
+    cisd_ts: int
+    cisd_level: float
+
+    structure_ts: int
+    structure_level: float
+
+    swing_ts: int
+
+    current_price: float
 
 
 # ============================================================
@@ -156,7 +160,7 @@ class Candle:
 
 def get_json(
     path: str,
-    params: Dict[str, Any],
+    params: Dict[str, Any]
 ) -> Dict[str, Any]:
 
     query = urlencode(params)
@@ -165,9 +169,7 @@ def get_json(
 
     last_err = None
 
-    for attempt in range(
-        REQUEST_RETRIES
-    ):
+    for attempt in range(REQUEST_RETRIES):
 
         try:
 
@@ -175,8 +177,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h-15m-cisd-scanner/2.0",
-
+                        "bitget-4h15m-structure-scanner/2.1",
                     "Accept":
                         "application/json",
                 },
@@ -185,14 +186,10 @@ def get_json(
 
             with urlopen(
                 req,
-                timeout=REQUEST_TIMEOUT,
+                timeout=REQUEST_TIMEOUT
             ) as resp:
 
-                body = (
-                    resp
-                    .read()
-                    .decode("utf-8")
-                )
+                body = resp.read().decode("utf-8")
 
                 data = json.loads(body)
 
@@ -227,7 +224,7 @@ def get_json(
 
 
 # ============================================================
-# SYMBOL UNIVERSE
+# SYMBOLS
 # ============================================================
 
 def get_symbols() -> List[str]:
@@ -235,62 +232,41 @@ def get_symbols() -> List[str]:
     data = get_json(
         "/api/v3/market/instruments",
         {
-            "category": PRODUCT_TYPE,
+            "category": PRODUCT_TYPE
         },
     )
 
-    symbols = []
+    symbols: List[str] = []
 
     total = 0
     excluded = 0
 
-    for item in data.get(
-        "data",
-        [],
-    ):
+    for item in data.get("data", []):
 
         total += 1
 
         symbol = str(
-            item.get(
-                "symbol",
-                "",
-            )
+            item.get("symbol", "")
         ).strip()
 
         quote_coin = str(
-            item.get(
-                "quoteCoin",
-                "",
-            )
+            item.get("quoteCoin", "")
         ).upper().strip()
 
         symbol_type = str(
-            item.get(
-                "symbolType",
-                "",
-            )
+            item.get("symbolType", "")
         ).lower().strip()
 
         contract_type = str(
-            item.get(
-                "type",
-                "",
-            )
+            item.get("type", "")
         ).lower().strip()
 
         status = str(
-            item.get(
-                "status",
-                "",
-            )
+            item.get("status", "")
         ).lower().strip()
 
         is_rwa = str(
-            item.get(
-                "isRwa",
-                "YES",
-            )
+            item.get("isRwa", "YES")
         ).upper().strip()
 
         if (
@@ -308,9 +284,7 @@ def get_symbols() -> List[str]:
 
             excluded += 1
 
-    symbols = sorted(
-        set(symbols)
-    )
+    symbols = sorted(set(symbols))
 
     print(
         f"[INFO] instruments: {total} | "
@@ -322,11 +296,13 @@ def get_symbols() -> List[str]:
 
 
 # ============================================================
-# 4H CANDLES
+# CANDLES
 # ============================================================
 
-def get_4h_candles(
+def get_candles(
     symbol: str,
+    granularity: str,
+    limit: int
 ) -> List[Candle]:
 
     data = get_json(
@@ -334,17 +310,14 @@ def get_4h_candles(
         {
             "symbol": symbol,
             "productType": PRODUCT_TYPE,
-            "granularity": "4H",
-            "limit": HISTORY_LIMIT_4H,
+            "granularity": granularity,
+            "limit": limit,
         },
     )
 
-    candles = []
+    candles: List[Candle] = []
 
-    for row in data.get(
-        "data",
-        [],
-    ):
+    for row in data.get("data", []):
 
         if len(row) < 6:
             continue
@@ -364,1049 +337,788 @@ def get_4h_candles(
         key=lambda x: x.ts
     )
 
-    # --------------------------------------------------------
-    # Remove incomplete current candle.
-    # --------------------------------------------------------
-
     now_ms = int(
         time.time() * 1000
     )
 
-    interval_ms = (
-        4
-        * 60
-        * 60
-        * 1000
-    )
+    interval_ms = {
+        "4H":
+            4 * 60 * 60 * 1000,
+
+        "15m":
+            15 * 60 * 1000,
+    }[granularity]
 
     candles = [
-        c
-        for c in candles
-        if c.ts + interval_ms <= now_ms
+        x for x in candles
+        if x.ts + interval_ms <= now_ms
     ]
 
     return candles
 
 
 # ============================================================
-# BASIC HELPERS
+# HELPERS
 # ============================================================
 
-def bullish(
-    c: Candle,
-) -> bool:
-
+def bullish(c: Candle) -> bool:
     return c.c > c.o
 
 
-def bearish(
-    c: Candle,
-) -> bool:
-
+def bearish(c: Candle) -> bool:
     return c.c < c.o
 
 
-def body_size(
-    c: Candle,
-) -> float:
+def body_ratio(c: Candle) -> float:
 
-    return abs(
-        c.c - c.o
-    )
-
-
-def candle_range(
-    c: Candle,
-) -> float:
-
-    return max(
+    candle_range = max(
         c.h - c.l,
-        1e-12,
+        1e-12
     )
 
-
-def body_ratio(
-    c: Candle,
-) -> float:
-
     return (
-        body_size(c)
+        abs(c.c - c.o)
         /
-        candle_range(c)
+        candle_range
     )
 
 
 # ============================================================
-# SWING HIGH / LOW
+# 4H LIQUIDITY SWEEP
 # ============================================================
 
-def is_swing_low(
+def find_latest_sweep(
     candles: List[Candle],
-    index: int,
-) -> bool:
+    direction: str
+) -> Optional[Dict[str, Any]]:
 
-    if index < SWING_LEFT:
-        return False
+    if len(candles) < LIQUIDITY_LOOKBACK + 2:
+        return None
 
-    if (
-        index + SWING_RIGHT
-        >= len(candles)
-    ):
-        return False
+    end = len(candles) - 1
 
-    current = candles[index]
-
-    left = candles[
-        index - SWING_LEFT:
-        index
-    ]
-
-    right = candles[
-        index + 1:
-        index + SWING_RIGHT + 1
-    ]
-
-    return (
-        current.l
-        <= min(
-            x.l for x in left
-        )
-        and
-        current.l
-        <= min(
-            x.l for x in right
-        )
+    start = max(
+        LIQUIDITY_LOOKBACK,
+        end - MAX_4H_EVENT_BARS + 1
     )
 
+    for i in range(
+        end,
+        start - 1,
+        -1
+    ):
+
+        current = candles[i]
+
+        previous = candles[
+            i - LIQUIDITY_LOOKBACK:i
+        ]
+
+        if not previous:
+            continue
+
+        # ----------------------------------------------------
+        # LONG
+        #
+        # Sell-side liquidity sweep
+        # Previous lows taken
+        # Then candle closes back above
+        # ----------------------------------------------------
+
+        if direction == "LONG":
+
+            prior_low = min(
+                c.l
+                for c in previous
+            )
+
+            if (
+                current.l < prior_low
+                and
+                current.c > prior_low
+            ):
+
+                return {
+                    "index": i,
+                    "ts": current.ts,
+                    "level": prior_low,
+                }
+
+        # ----------------------------------------------------
+        # SHORT
+        #
+        # Buy-side liquidity sweep
+        # Previous highs taken
+        # Then candle closes back below
+        # ----------------------------------------------------
+
+        else:
+
+            prior_high = max(
+                c.h
+                for c in previous
+            )
+
+            if (
+                current.h > prior_high
+                and
+                current.c < prior_high
+            ):
+
+                return {
+                    "index": i,
+                    "ts": current.ts,
+                    "level": prior_high,
+                }
+
+    return None
+
+
+# ============================================================
+# 4H CISD AFTER SWEEP
+# ============================================================
+
+def find_cisd_after_sweep(
+    candles: List[Candle],
+    direction: str,
+    sweep: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+
+    sweep_index = sweep["index"]
+
+    start = sweep_index + 1
+
+    end = min(
+        len(candles) - 1,
+        sweep_index
+        + MAX_SWEEP_TO_CISD_BARS
+    )
+
+    if start > end:
+        return None
+
+    for i in range(
+        start,
+        end + 1
+    ):
+
+        cur = candles[i]
+
+        ref = candles[i - 1]
+
+        # ----------------------------------------------------
+        # LONG
+        # ----------------------------------------------------
+
+        if direction == "LONG":
+
+            if not bullish(cur):
+                continue
+
+            if cur.c <= ref.h:
+                continue
+
+            if (
+                body_ratio(cur)
+                <
+                MIN_CISD_BODY_RATIO
+            ):
+                continue
+
+            return {
+                "index": i,
+                "ts": cur.ts,
+                "level": ref.h,
+            }
+
+        # ----------------------------------------------------
+        # SHORT
+        # ----------------------------------------------------
+
+        else:
+
+            if not bearish(cur):
+                continue
+
+            if cur.c >= ref.l:
+                continue
+
+            if (
+                body_ratio(cur)
+                <
+                MIN_CISD_BODY_RATIO
+            ):
+                continue
+
+            return {
+                "index": i,
+                "ts": cur.ts,
+                "level": ref.l,
+            }
+
+    return None
+
+
+# ============================================================
+# 15M SWING
+# ============================================================
 
 def is_swing_high(
     candles: List[Candle],
-    index: int,
+    idx: int
 ) -> bool:
 
-    if index < SWING_LEFT:
-        return False
-
     if (
-        index + SWING_RIGHT
-        >= len(candles)
+        idx < SWING_LEFT
+        or
+        idx + SWING_RIGHT >= len(candles)
     ):
         return False
 
-    current = candles[index]
+    current = candles[idx]
 
-    left = candles[
-        index - SWING_LEFT:
-        index
+    left = [
+        candles[j].h
+        for j in range(
+            idx - SWING_LEFT,
+            idx
+        )
     ]
 
-    right = candles[
-        index + 1:
-        index + SWING_RIGHT + 1
+    right = [
+        candles[j].h
+        for j in range(
+            idx + 1,
+            idx + SWING_RIGHT + 1
+        )
     ]
 
     return (
-        current.h
-        >= max(
-            x.h for x in left
-        )
+        current.h >= max(left)
         and
-        current.h
-        >= max(
-            x.h for x in right
+        current.h >= max(right)
+    )
+
+
+def is_swing_low(
+    candles: List[Candle],
+    idx: int
+) -> bool:
+
+    if (
+        idx < SWING_LEFT
+        or
+        idx + SWING_RIGHT >= len(candles)
+    ):
+        return False
+
+    current = candles[idx]
+
+    left = [
+        candles[j].l
+        for j in range(
+            idx - SWING_LEFT,
+            idx
         )
-    )
-
-
-# ============================================================
-# RECENT SWING LOW
-# ============================================================
-
-def find_recent_swing_low(
-    candles: List[Candle],
-    before_index: int,
-) -> Optional[Dict[str, Any]]:
-
-    start = max(
-        SWING_LEFT,
-        before_index
-        - SWING_LOOKBACK,
-    )
-
-    end = min(
-        before_index
-        - SWING_RIGHT
-        - 1,
-        len(candles)
-        - SWING_RIGHT
-        - 1,
-    )
-
-    if end < start:
-        return None
-
-    for i in range(
-        end,
-        start - 1,
-        -1,
-    ):
-
-        if is_swing_low(
-            candles,
-            i,
-        ):
-
-            return {
-                "index": i,
-                "ts": candles[i].ts,
-                "level": candles[i].l,
-            }
-
-    return None
-
-
-# ============================================================
-# RECENT SWING HIGH
-# ============================================================
-
-def find_recent_swing_high(
-    candles: List[Candle],
-    before_index: int,
-) -> Optional[Dict[str, Any]]:
-
-    start = max(
-        SWING_LEFT,
-        before_index
-        - SWING_LOOKBACK,
-    )
-
-    end = min(
-        before_index
-        - SWING_RIGHT
-        - 1,
-        len(candles)
-        - SWING_RIGHT
-        - 1,
-    )
-
-    if end < start:
-        return None
-
-    for i in range(
-        end,
-        start - 1,
-        -1,
-    ):
-
-        if is_swing_high(
-            candles,
-            i,
-        ):
-
-            return {
-                "index": i,
-                "ts": candles[i].ts,
-                "level": candles[i].h,
-            }
-
-    return None
-
-
-# ============================================================
-# LONG SWEEP
-# ============================================================
-
-def find_long_sweep(
-    candles: List[Candle],
-) -> Optional[Dict[str, Any]]:
-
-    """
-    LONG:
-
-        confirmed swing low
-              ↓
-        price trades below it
-              ↓
-        candle closes back above it
-    """
-
-    end = len(candles) - 1
-
-    start = max(
-        SWING_LEFT + SWING_RIGHT + 1,
-        end - MAX_EVENT_LOOKBACK,
-    )
-
-    for sweep_index in range(
-        end,
-        start - 1,
-        -1,
-    ):
-
-        sweep = candles[
-            sweep_index
-        ]
-
-        if (
-            body_ratio(sweep)
-            < MIN_SWEEP_BODY_RATIO
-        ):
-            continue
-
-        swing = (
-            find_recent_swing_low(
-                candles,
-                sweep_index,
-            )
-        )
-
-        if not swing:
-            continue
-
-        level = swing[
-            "level"
-        ]
-
-        # Must actually sweep the swing low.
-        if sweep.l >= level:
-            continue
-
-        # Must reclaim the level.
-        if sweep.c <= level:
-            continue
-
-        return {
-            "index": sweep_index,
-            "ts": sweep.ts,
-            "level": level,
-            "swing_index":
-                swing["index"],
-            "swing_ts":
-                swing["ts"],
-        }
-
-    return None
-
-
-# ============================================================
-# SHORT SWEEP
-# ============================================================
-
-def find_short_sweep(
-    candles: List[Candle],
-) -> Optional[Dict[str, Any]]:
-
-    """
-    SHORT:
-
-        confirmed swing high
-              ↓
-        price trades above it
-              ↓
-        candle closes back below it
-    """
-
-    end = len(candles) - 1
-
-    start = max(
-        SWING_LEFT + SWING_RIGHT + 1,
-        end - MAX_EVENT_LOOKBACK,
-    )
-
-    for sweep_index in range(
-        end,
-        start - 1,
-        -1,
-    ):
-
-        sweep = candles[
-            sweep_index
-        ]
-
-        if (
-            body_ratio(sweep)
-            < MIN_SWEEP_BODY_RATIO
-        ):
-            continue
-
-        swing = (
-            find_recent_swing_high(
-                candles,
-                sweep_index,
-            )
-        )
-
-        if not swing:
-            continue
-
-        level = swing[
-            "level"
-        ]
-
-        # Must actually sweep the swing high.
-        if sweep.h <= level:
-            continue
-
-        # Must reclaim below the level.
-        if sweep.c >= level:
-            continue
-
-        return {
-            "index": sweep_index,
-            "ts": sweep.ts,
-            "level": level,
-            "swing_index":
-                swing["index"],
-            "swing_ts":
-                swing["ts"],
-        }
-
-    return None
-
-
-# ============================================================
-# LONG CISD AFTER SWEEP
-# ============================================================
-
-def find_long_cisd_after_sweep(
-    candles: List[Candle],
-    sweep: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-
-    sweep_index = sweep[
-        "index"
     ]
 
-    end = min(
-        len(candles) - 1,
-        sweep_index
-        + MAX_CISD_AFTER_SWEEP,
-    )
-
-    # CISD MUST happen after sweep.
-    for cisd_index in range(
-        sweep_index + 1,
-        end + 1,
-    ):
-
-        current = candles[
-            cisd_index
-        ]
-
-        # Need a bearish reference candle.
-        reference = None
-
+    right = [
+        candles[j].l
         for j in range(
-            cisd_index - 1,
-            sweep_index,
-            -1,
-        ):
-
-            if bearish(
-                candles[j]
-            ):
-
-                reference = candles[j]
-
-                break
-
-        if reference is None:
-            continue
-
-        # Bullish displacement.
-        if not bullish(current):
-            continue
-
-        if (
-            body_ratio(current)
-            < MIN_CISD_BODY_RATIO
-        ):
-            continue
-
-        # BODY CLOSE above bearish reference high.
-        if current.c <= reference.h:
-            continue
-
-        return {
-            "index": cisd_index,
-            "ts": current.ts,
-            "level": reference.h,
-            "reference_ts":
-                reference.ts,
-        }
-
-    return None
-
-
-# ============================================================
-# SHORT CISD AFTER SWEEP
-# ============================================================
-
-def find_short_cisd_after_sweep(
-    candles: List[Candle],
-    sweep: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-
-    sweep_index = sweep[
-        "index"
+            idx + 1,
+            idx + SWING_RIGHT + 1
+        )
     ]
 
-    end = min(
-        len(candles) - 1,
-        sweep_index
-        + MAX_CISD_AFTER_SWEEP,
+    return (
+        current.l <= min(left)
+        and
+        current.l <= min(right)
     )
 
-    # CISD MUST happen after sweep.
-    for cisd_index in range(
-        sweep_index + 1,
-        end + 1,
-    ):
 
-        current = candles[
-            cisd_index
-        ]
+# ============================================================
+# 15M STRUCTURE BREAK
+# ============================================================
 
-        # Need a bullish reference candle.
-        reference = None
+def find_structure_break(
+    candles: List[Candle],
+    direction: str,
+    start_index: int
+) -> Optional[Dict[str, Any]]:
 
-        for j in range(
-            cisd_index - 1,
-            sweep_index,
-            -1,
+    search_end = min(
+        len(candles) - 1,
+        start_index
+        + MAX_15M_STRUCTURE_BARS
+    )
+
+    if start_index >= search_end:
+        return None
+
+    # --------------------------------------------------------
+    # LONG
+    # --------------------------------------------------------
+
+    if direction == "LONG":
+
+        for break_index in range(
+            start_index,
+            search_end + 1
         ):
 
-            if bullish(
-                candles[j]
+            cur = candles[
+                break_index
+            ]
+
+            if not bullish(cur):
+                continue
+
+            if (
+                body_ratio(cur)
+                <
+                MIN_STRUCTURE_BODY_RATIO
+            ):
+                continue
+
+            # Find newest confirmed swing high
+            # BEFORE the breakout candle.
+            swing_end = (
+                break_index
+                - SWING_RIGHT
+                - 1
+            )
+
+            if swing_end < start_index:
+                continue
+
+            for swing_index in range(
+                swing_end,
+                start_index - 1,
+                -1
             ):
 
-                reference = candles[j]
+                if not is_swing_high(
+                    candles,
+                    swing_index
+                ):
+                    continue
 
-                break
+                if (
+                    break_index
+                    -
+                    swing_index
+                    <
+                    MIN_STRUCTURE_DISTANCE
+                ):
+                    continue
 
-        if reference is None:
-            continue
+                level = candles[
+                    swing_index
+                ].h
 
-        # Bearish displacement.
-        if not bearish(current):
-            continue
+                # BODY CLOSE above structure.
+                if cur.c <= level:
+                    continue
 
-        if (
-            body_ratio(current)
-            < MIN_CISD_BODY_RATIO
+                return {
+                    "index":
+                        break_index,
+
+                    "ts":
+                        cur.ts,
+
+                    "level":
+                        level,
+
+                    "swing_ts":
+                        candles[
+                            swing_index
+                        ].ts,
+                }
+
+    # --------------------------------------------------------
+    # SHORT
+    # --------------------------------------------------------
+
+    else:
+
+        for break_index in range(
+            start_index,
+            search_end + 1
         ):
-            continue
 
-        # BODY CLOSE below bullish reference low.
-        if current.c >= reference.l:
-            continue
+            cur = candles[
+                break_index
+            ]
 
-        return {
-            "index": cisd_index,
-            "ts": current.ts,
-            "level": reference.l,
-            "reference_ts":
-                reference.ts,
-        }
+            if not bearish(cur):
+                continue
+
+            if (
+                body_ratio(cur)
+                <
+                MIN_STRUCTURE_BODY_RATIO
+            ):
+                continue
+
+            swing_end = (
+                break_index
+                - SWING_RIGHT
+                - 1
+            )
+
+            if swing_end < start_index:
+                continue
+
+            for swing_index in range(
+                swing_end,
+                start_index - 1,
+                -1
+            ):
+
+                if not is_swing_low(
+                    candles,
+                    swing_index
+                ):
+                    continue
+
+                if (
+                    break_index
+                    -
+                    swing_index
+                    <
+                    MIN_STRUCTURE_DISTANCE
+                ):
+                    continue
+
+                level = candles[
+                    swing_index
+                ].l
+
+                # BODY CLOSE below structure.
+                if cur.c >= level:
+                    continue
+
+                return {
+                    "index":
+                        break_index,
+
+                    "ts":
+                        cur.ts,
+
+                    "level":
+                        level,
+
+                    "swing_ts":
+                        candles[
+                            swing_index
+                        ].ts,
+                }
 
     return None
 
 
 # ============================================================
-# SYMBOL DIAGNOSTIC
+# SYMBOL ANALYSIS
 # ============================================================
 
-def diagnose_symbol(
-    symbol: str,
+def analyze_symbol(
+    symbol: str
 ) -> Dict[str, Any]:
 
-    result = {
+    diagnostic = {
+        "long_event": False,
+        "short_event": False,
 
-        "symbol": symbol,
+        "long_structure": False,
+        "short_structure": False,
 
-        # Stage 1
-        "sweep_long": False,
-        "sweep_short": False,
-
-        # Stage 2
-        "sequence_long": False,
-        "sequence_short": False,
-
-        # Stage 3
-        "cisd_long": False,
-        "cisd_short": False,
-
-        # Stage 4
-        "recent_long": False,
-        "recent_short": False,
-
-        "sweep_long_data": None,
-        "sweep_short_data": None,
-
-        "cisd_long_data": None,
-        "cisd_short_data": None,
-
-        "error": None,
+        "long_candidate": None,
+        "short_candidate": None,
     }
 
     try:
 
-        candles = get_4h_candles(
-            symbol
+        c4 = get_candles(
+            symbol,
+            "4H",
+            HISTORY_LIMIT_4H
         )
 
-        if len(candles) < 50:
-            return result
+        c15 = get_candles(
+            symbol,
+            "15m",
+            HISTORY_LIMIT_15M
+        )
+
+        if (
+            len(c4) < 40
+            or
+            len(c15) < 100
+        ):
+
+            return diagnostic
 
         # ====================================================
-        # ① SWEEP
+        # LONG
         # ====================================================
 
-        long_sweep = (
-            find_long_sweep(
-                candles
+        sweep_long = find_latest_sweep(
+            c4,
+            "LONG"
+        )
+
+        if sweep_long:
+
+            cisd_long = find_cisd_after_sweep(
+                c4,
+                "LONG",
+                sweep_long
             )
-        )
 
-        short_sweep = (
-            find_short_sweep(
-                candles
-            )
-        )
+            if cisd_long:
 
-        if long_sweep:
-
-            result[
-                "sweep_long"
-            ] = True
-
-            result[
-                "sweep_long_data"
-            ] = long_sweep
-
-        if short_sweep:
-
-            result[
-                "sweep_short"
-            ] = True
-
-            result[
-                "sweep_short_data"
-            ] = short_sweep
-
-        # ====================================================
-        # ② SWEEP → CISD SEQUENCE
-        # ====================================================
-
-        long_cisd = None
-
-        if long_sweep:
-
-            long_cisd = (
-                find_long_cisd_after_sweep(
-                    candles,
-                    long_sweep,
+                recency = (
+                    len(c4)
+                    - 1
+                    -
+                    cisd_long["index"]
                 )
-            )
 
-            if long_cisd:
+                if recency <= MAX_4H_RECENCY_BARS:
 
-                result[
-                    "sequence_long"
-                ] = True
+                    diagnostic[
+                        "long_event"
+                    ] = True
 
-        short_cisd = None
+                    # Find first 15M candle
+                    # AFTER the 4H CISD.
+                    start15 = next(
+                        (
+                            i
+                            for i, c
+                            in enumerate(c15)
+                            if c.ts >
+                            cisd_long["ts"]
+                        ),
+                        len(c15)
+                    )
 
-        if short_sweep:
+                    if (
+                        start15
+                        <
+                        len(c15) - 10
+                    ):
 
-            short_cisd = (
-                find_short_cisd_after_sweep(
-                    candles,
-                    short_sweep,
-                )
-            )
+                        structure = (
+                            find_structure_break(
+                                c15,
+                                "LONG",
+                                start15
+                            )
+                        )
 
-            if short_cisd:
+                        if structure:
 
-                result[
-                    "sequence_short"
-                ] = True
+                            diagnostic[
+                                "long_structure"
+                            ] = True
+
+                            diagnostic[
+                                "long_candidate"
+                            ] = StructureCandidate(
+                                symbol=symbol,
+                                direction="LONG",
+
+                                sweep_ts=
+                                    sweep_long["ts"],
+
+                                sweep_level=
+                                    sweep_long["level"],
+
+                                cisd_ts=
+                                    cisd_long["ts"],
+
+                                cisd_level=
+                                    cisd_long["level"],
+
+                                structure_ts=
+                                    structure["ts"],
+
+                                structure_level=
+                                    structure["level"],
+
+                                swing_ts=
+                                    structure["swing_ts"],
+
+                                current_price=
+                                    c15[-1].c,
+                            )
 
         # ====================================================
-        # ③ CISD
+        # SHORT
         # ====================================================
 
-        if long_cisd:
-
-            result[
-                "cisd_long"
-            ] = True
-
-            result[
-                "cisd_long_data"
-            ] = long_cisd
-
-        if short_cisd:
-
-            result[
-                "cisd_short"
-            ] = True
-
-            result[
-                "cisd_short_data"
-            ] = short_cisd
-
-        # ====================================================
-        # ④ RECENTNESS
-        # ====================================================
-
-        latest_index = (
-            len(candles) - 1
+        sweep_short = find_latest_sweep(
+            c4,
+            "SHORT"
         )
 
-        if long_cisd:
+        if sweep_short:
 
-            age = (
-                latest_index
-                -
-                long_cisd["index"]
+            cisd_short = find_cisd_after_sweep(
+                c4,
+                "SHORT",
+                sweep_short
             )
 
-            if age <= MAX_FINAL_EVENT_AGE:
+            if cisd_short:
 
-                result[
-                    "recent_long"
-                ] = True
+                recency = (
+                    len(c4)
+                    - 1
+                    -
+                    cisd_short["index"]
+                )
 
-        if short_cisd:
+                if recency <= MAX_4H_RECENCY_BARS:
 
-            age = (
-                latest_index
-                -
-                short_cisd["index"]
-            )
+                    diagnostic[
+                        "short_event"
+                    ] = True
 
-            if age <= MAX_FINAL_EVENT_AGE:
+                    start15 = next(
+                        (
+                            i
+                            for i, c in enumerate(c15)
+                            if c.ts >
+                            cisd_short["ts"]
+                        ),
+                        len(c15)
+                    )
 
-                result[
-                    "recent_short"
-                ] = True
+                    if (
+                        start15
+                        <
+                        len(c15) - 10
+                    ):
 
-        return result
+                        structure = (
+                            find_structure_break(
+                                c15,
+                                "SHORT",
+                                start15
+                            )
+                        )
+
+                        if structure:
+
+                            diagnostic[
+                                "short_structure"
+                            ] = True
+
+                            diagnostic[
+                                "short_candidate"
+                            ] = StructureCandidate(
+                                symbol=symbol,
+                                direction="SHORT",
+
+                                sweep_ts=
+                                    sweep_short["ts"],
+
+                                sweep_level=
+                                    sweep_short["level"],
+
+                                cisd_ts=
+                                    cisd_short["ts"],
+
+                                cisd_level=
+                                    cisd_short["level"],
+
+                                structure_ts=
+                                    structure["ts"],
+
+                                structure_level=
+                                    structure["level"],
+
+                                swing_ts=
+                                    structure["swing_ts"],
+
+                                current_price=
+                                    c15[-1].c,
+                            )
+
+        return diagnostic
 
     except Exception as exc:
 
-        result[
-            "error"
-        ] = str(exc)
+        diagnostic["error"] = str(exc)
 
-        print(
-            f"[WARN] {symbol}: {exc}",
-            file=sys.stderr,
-        )
-
-        return result
+        return diagnostic
 
 
 # ============================================================
-# REPORT
+# FORMAT
 # ============================================================
 
-def build_report(
-    diagnostics: List[Dict[str, Any]],
-    symbol_count: int,
+def fmt_price(
+    value: float
 ) -> str:
 
-    now = datetime.now(
-        timezone.utc
+    if value >= 1000:
+        return f"{value:,.2f}"
+
+    if value >= 1:
+        return f"{value:,.4f}"
+
+    return f"{value:.8f}"
+
+
+def short_ts(
+    ts: int
+) -> str:
+
+    return datetime.fromtimestamp(
+        ts / 1000,
+        tz=timezone.utc
     ).strftime(
-        "%Y-%m-%d %H:%M UTC"
+        "%m-%d %H:%M UTC"
     )
 
-    # ========================================================
-    # COUNTS
-    # ========================================================
 
-    sweep_long = sum(
-        1
-        for x in diagnostics
-        if x["sweep_long"]
+def format_candidate(
+    c: StructureCandidate
+) -> str:
+
+    icon = (
+        "🟢"
+        if c.direction == "LONG"
+        else "🔴"
     )
 
-    sweep_short = sum(
-        1
-        for x in diagnostics
-        if x["sweep_short"]
+    return (
+        f"{icon} {c.symbol} "
+        f"{c.direction}\n"
+
+        f"4H Sweep: "
+        f"{fmt_price(c.sweep_level)} "
+        f"({short_ts(c.sweep_ts)})\n"
+
+        f"4H CISD: "
+        f"{fmt_price(c.cisd_level)} "
+        f"({short_ts(c.cisd_ts)})\n"
+
+        f"15M Structure: "
+        f"{fmt_price(c.structure_level)} "
+        f"({short_ts(c.structure_ts)})\n"
+
+        f"15M Swing: "
+        f"{short_ts(c.swing_ts)}\n"
+
+        f"현재가: "
+        f"{fmt_price(c.current_price)}"
     )
-
-    sequence_long = sum(
-        1
-        for x in diagnostics
-        if x["sequence_long"]
-    )
-
-    sequence_short = sum(
-        1
-        for x in diagnostics
-        if x["sequence_short"]
-    )
-
-    cisd_long = sum(
-        1
-        for x in diagnostics
-        if x["cisd_long"]
-    )
-
-    cisd_short = sum(
-        1
-        for x in diagnostics
-        if x["cisd_short"]
-    )
-
-    recent_long = sum(
-        1
-        for x in diagnostics
-        if x["recent_long"]
-    )
-
-    recent_short = sum(
-        1
-        for x in diagnostics
-        if x["recent_short"]
-    )
-
-    errors = sum(
-        1
-        for x in diagnostics
-        if x["error"]
-    )
-
-    # ========================================================
-    # FINAL
-    # ========================================================
-
-    final_long = [
-        x
-        for x in diagnostics
-        if x["recent_long"]
-    ]
-
-    final_short = [
-        x
-        for x in diagnostics
-        if x["recent_short"]
-    ]
-
-    # ========================================================
-    # REPORT
-    # ========================================================
-
-    lines = []
-
-    lines.append(
-        "🔎 "
-        "4H→15M Structure Scanner v2.0"
-    )
-
-    lines.append(
-        now
-    )
-
-    lines.append("")
-
-    lines.append(
-        f"스캔 {symbol_count}개"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    lines.append(
-        "🔬 v2.0 4H EVENT DIAGNOSTIC"
-    )
-
-    lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # ①
-    # --------------------------------------------------------
-
-    lines.append(
-        "① 4H Liquidity Sweep"
-    )
-
-    lines.append(
-        f"   └ LONG  : {sweep_long}"
-    )
-
-    lines.append(
-        f"   └ SHORT : {sweep_short}"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # ②
-    # --------------------------------------------------------
-
-    lines.append(
-        "② Sweep → CISD 순서 성립"
-    )
-
-    lines.append(
-        f"   └ LONG  : {sequence_long}"
-    )
-
-    lines.append(
-        f"   └ SHORT : {sequence_short}"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # ③
-    # --------------------------------------------------------
-
-    lines.append(
-        "③ 4H CISD"
-    )
-
-    lines.append(
-        f"   └ LONG  : {cisd_long}"
-    )
-
-    lines.append(
-        f"   └ SHORT : {cisd_short}"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # ④
-    # --------------------------------------------------------
-
-    lines.append(
-        "④ 최근성 조건 통과"
-    )
-
-    lines.append(
-        f"   └ LONG  : {recent_long}"
-    )
-
-    lines.append(
-        f"   └ SHORT : {recent_short}"
-    )
-
-    lines.append("")
-
-    lines.append(
-        f"⚠️ API/분석 오류 : {errors}"
-    )
-
-    lines.append("")
-
-    # ========================================================
-    # FINAL SYMBOLS
-    # ========================================================
-
-    if final_long:
-
-        lines.append(
-            "🟢 FINAL 4H LONG EVENT"
-        )
-
-        for x in final_long[:10]:
-
-            sweep = (
-                x["sweep_long_data"]
-            )
-
-            cisd = (
-                x["cisd_long_data"]
-            )
-
-            lines.append(
-                f"   {x['symbol']} | "
-                f"Sweep {sweep['level']} | "
-                f"CISD {cisd['level']}"
-            )
-
-        lines.append("")
-
-    if final_short:
-
-        lines.append(
-            "🔴 FINAL 4H SHORT EVENT"
-        )
-
-        for x in final_short[:10]:
-
-            sweep = (
-                x["sweep_short_data"]
-            )
-
-            cisd = (
-                x["cisd_short_data"]
-            )
-
-            lines.append(
-                f"   {x['symbol']} | "
-                f"Sweep {sweep['level']} | "
-                f"CISD {cisd['level']}"
-            )
-
-        lines.append("")
-
-    # ========================================================
-    # FINAL MESSAGE
-    # ========================================================
-
-    final_count = (
-        len(final_long)
-        +
-        len(final_short)
-    )
-
-    if final_count == 0:
-
-        lines.append(
-            "🔥 최종 4H 이벤트 없음"
-        )
-
-    else:
-
-        lines.append(
-            f"🔥 최종 4H 이벤트 "
-            f"{final_count}개"
-        )
-
-    lines.append("")
-
-    lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    lines.append(
-        "다음 단계:"
-    )
-
-    lines.append(
-        "4H 이벤트 검증 후 "
-        "15M Structure 연결"
-    )
-
-    lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
-
-    return "\n".join(lines)
 
 
 # ============================================================
@@ -1414,24 +1126,20 @@ def build_report(
 # ============================================================
 
 def send_telegram(
-    text: str,
+    text: str
 ) -> None:
 
     token = os.getenv(
         "TELEGRAM_BOT_TOKEN",
-        "",
+        ""
     ).strip()
 
     chat_id = os.getenv(
         "TELEGRAM_CHAT_ID",
-        "",
+        ""
     ).strip()
 
-    if (
-        not token
-        or
-        not chat_id
-    ):
+    if not token or not chat_id:
 
         print(
             "[INFO] Telegram secrets "
@@ -1447,14 +1155,9 @@ def send_telegram(
 
     payload = urlencode(
         {
-            "chat_id":
-                chat_id,
-
-            "text":
-                text,
-
-            "disable_web_page_preview":
-                "true",
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": "true",
         }
     ).encode()
 
@@ -1470,10 +1173,156 @@ def send_telegram(
 
     with urlopen(
         req,
-        timeout=REQUEST_TIMEOUT,
+        timeout=REQUEST_TIMEOUT
     ) as resp:
 
         resp.read()
+
+
+# ============================================================
+# REPORT
+# ============================================================
+
+def build_report(
+    diagnostics: List[Dict[str, Any]],
+    symbol_count: int,
+    errors: int
+) -> str:
+
+    now = datetime.now(
+        timezone.utc
+    ).strftime(
+        "%Y-%m-%d %H:%M UTC"
+    )
+
+    long_events = [
+        x
+        for x in diagnostics
+        if x.get("long_event")
+    ]
+
+    short_events = [
+        x
+        for x in diagnostics
+        if x.get("short_event")
+    ]
+
+    long_structure = [
+        x["long_candidate"]
+        for x in diagnostics
+        if x.get("long_structure")
+        and x.get("long_candidate")
+    ]
+
+    short_structure = [
+        x["short_candidate"]
+        for x in diagnostics
+        if x.get("short_structure")
+        and x.get("short_candidate")
+    ]
+
+    candidates = (
+        long_structure
+        +
+        short_structure
+    )
+
+    # --------------------------------------------------------
+    # HEADER
+    # --------------------------------------------------------
+
+    lines = [
+
+        "🔎 "
+        "4H→15M Structure Scanner v2.1",
+
+        now,
+
+        "",
+
+        f"스캔 {symbol_count}개",
+
+        "",
+
+        "━━━━━━━━━━━━━━━━━━━━━━",
+
+        "🔬 v2.1 DIAGNOSTIC",
+
+        "━━━━━━━━━━━━━━━━━━━━━━",
+
+        "① 4H FINAL EVENT",
+
+        f"   └ LONG  : "
+        f"{len(long_events)}",
+
+        f"   └ SHORT : "
+        f"{len(short_events)}",
+
+        "",
+
+        "② 15M Structure",
+
+        f"   └ LONG  : "
+        f"{len(long_structure)}",
+
+        f"   └ SHORT : "
+        f"{len(short_structure)}",
+
+        "",
+
+        f"⚠️ API/분석 오류 : "
+        f"{errors}",
+
+        "",
+
+        f"🔥 FINAL 4H→15M STRUCTURE "
+        f": {len(candidates)}개",
+
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    # --------------------------------------------------------
+    # CANDIDATES
+    # --------------------------------------------------------
+
+    if candidates:
+
+        lines += [
+            "",
+            "🔥 STRUCTURE CANDIDATES",
+            ""
+        ]
+
+        for candidate in sorted(
+            candidates,
+            key=lambda x: (
+                x.symbol,
+                x.direction
+            )
+        )[:20]:
+
+            lines.append(
+                format_candidate(
+                    candidate
+                )
+            )
+
+            lines.append(
+                "────────────────"
+            )
+
+    else:
+
+        lines += [
+            "",
+            "🔥 유효 15M Structure 후보 없음",
+            "",
+            "다음 단계:",
+            "4H 이벤트 → 15M Structure "
+            "연결 검증 필요",
+        ]
+
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -1487,21 +1336,19 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M CISD Scanner v2.0\n"
+        " Bitget 4H -> 15M Structure Scanner v2.1\n"
         "============================================\n"
     )
 
     print(
-        "DIAGNOSTIC MODE"
+        "CRYPTO ONLY | "
+        "USDT PERPETUAL ONLY | "
+        "LONG + SHORT"
     )
 
     print(
-        "4H SWEEP -> "
-        "4H CISD"
-    )
-
-    print(
-        "15M logic is DISABLED."
+        "4H Sweep -> CISD -> Recency -> "
+        "15M Swing Structure"
     )
 
     print(
@@ -1523,7 +1370,11 @@ def main() -> None:
     # SCAN
     # ========================================================
 
-    diagnostics = []
+    diagnostics: List[
+        Dict[str, Any]
+    ] = []
+
+    errors = 0
 
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS
@@ -1531,8 +1382,8 @@ def main() -> None:
 
         futures = {
             executor.submit(
-                diagnose_symbol,
-                symbol,
+                analyze_symbol,
+                symbol
             ): symbol
             for symbol in symbols
         }
@@ -1547,24 +1398,23 @@ def main() -> None:
 
             try:
 
-                result = (
-                    future.result()
-                )
+                result = future.result()
 
                 diagnostics.append(
                     result
                 )
 
+                if result.get("error"):
+                    errors += 1
+
             except Exception as exc:
 
-                symbol = futures[
-                    future
-                ]
+                errors += 1
 
                 print(
-                    f"[WARN] worker error "
-                    f"{symbol}: {exc}",
-                    file=sys.stderr,
+                    f"[WARN] worker error: "
+                    f"{exc}",
+                    file=sys.stderr
                 )
 
             if done % 50 == 0:
@@ -1581,6 +1431,7 @@ def main() -> None:
     report = build_report(
         diagnostics,
         len(symbols),
+        errors
     )
 
     print(
@@ -1602,21 +1453,38 @@ def main() -> None:
         print(
             f"[WARN] Telegram failed: "
             f"{exc}",
-            file=sys.stderr,
+            file=sys.stderr
         )
 
     # ========================================================
     # JSON
     # ========================================================
 
+    json_results = []
+
+    for item in diagnostics:
+
+        for key in (
+            "long_candidate",
+            "short_candidate"
+        ):
+
+            candidate = item.get(key)
+
+            if candidate:
+
+                json_results.append(
+                    asdict(candidate)
+                )
+
     with open(
-        "cisd_v2_0_diagnostic.json",
+        "structure_scan_results.json",
         "w",
-        encoding="utf-8",
+        encoding="utf-8"
     ) as f:
 
         json.dump(
-            diagnostics,
+            json_results,
             f,
             ensure_ascii=False,
             indent=2,
