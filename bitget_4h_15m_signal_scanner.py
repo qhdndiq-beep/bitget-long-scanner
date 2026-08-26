@@ -92,19 +92,12 @@ MIN_STRUCTURE_BODY_RATIO = 0.25
 # BOX / FAKE BREAKOUT FILTER
 # ============================================================
 
-# Number of CLOSED 15M candles used to detect
-# a recent trading range / box.
 BOX_LOOKBACK = 32
 
-# Minimum ATR distance that the CURRENT candle
-# must close outside the recent box.
 MIN_BOX_BREAK_ATR = 0.10
 
-# If the recent range is too compressed relative
-# to ATR, it is treated as a potential box.
 MAX_BOX_RANGE_ATR = 5.5
 
-# ATR period.
 ATR_PERIOD = 14
 
 
@@ -115,7 +108,6 @@ ATR_PERIOD = 14
 MIN_SIGNAL_SCORE = 65
 MAX_TELEGRAM_SIGNALS = 10
 
-# RVOL period.
 RVOL_PERIOD = 20
 
 
@@ -838,16 +830,6 @@ def check_box_breakout(
         box_range / current_atr
     )
 
-    # --------------------------------------------------------
-    # IMPORTANT:
-    #
-    # If the market has been extremely compressed,
-    # do not automatically accept a tiny wick break.
-    #
-    # We require the CURRENT CLOSED candle to close
-    # meaningfully outside the recent range.
-    # --------------------------------------------------------
-
     if direction == "LONG":
 
         break_distance = (
@@ -1007,7 +989,6 @@ def score_candle_quality(
 
     score = 0.0
 
-    # Body quality: maximum 10
     if ratio >= 0.70:
         score += 10
     elif ratio >= 0.55:
@@ -1019,7 +1000,6 @@ def score_candle_quality(
     else:
         score += 2
 
-    # Close quality: maximum 5
     if close_position >= 0.80:
         score += 5
     elif close_position >= 0.65:
@@ -1070,7 +1050,6 @@ def score_4h_quality(
         0.0,
     )
 
-    # CISD strength: maximum 10
     if cisd_body >= 0.70:
         score += 10
     elif cisd_body >= 0.55:
@@ -1080,7 +1059,6 @@ def score_4h_quality(
     elif cisd_body >= 0.30:
         score += 4
 
-    # Recency: maximum 5
     if recency <= 2:
         score += 5
     elif recency <= 4:
@@ -1185,10 +1163,6 @@ def analyze_symbol(
         Dict[str, Any]
     ] = []
 
-    # --------------------------------------------------------
-    # 4H
-    # --------------------------------------------------------
-
     try:
 
         c4 = get_candles(
@@ -1203,10 +1177,6 @@ def analyze_symbol(
 
     if len(c4) < 40:
         return signals
-
-    # --------------------------------------------------------
-    # LONG + SHORT
-    # --------------------------------------------------------
 
     for direction in (
         "LONG",
@@ -1242,10 +1212,6 @@ def analyze_symbol(
         ):
             continue
 
-        # ----------------------------------------------------
-        # 15M
-        # ----------------------------------------------------
-
         try:
 
             c15 = get_candles(
@@ -1261,10 +1227,6 @@ def analyze_symbol(
         if len(c15) < 100:
             continue
 
-        # ----------------------------------------------------
-        # First 15M candle AFTER 4H CISD
-        # ----------------------------------------------------
-
         start15 = next(
             (
                 i
@@ -1278,10 +1240,6 @@ def analyze_symbol(
         if start15 >= len(c15):
             continue
 
-        # ----------------------------------------------------
-        # CURRENT CLOSED CANDLE STRUCTURE BREAK
-        # ----------------------------------------------------
-
         structure = (
             check_current_structure_break(
                 c15,
@@ -1293,10 +1251,6 @@ def analyze_symbol(
         if not structure:
             continue
 
-        # ----------------------------------------------------
-        # BOX / FAKE BREAKOUT FILTER
-        # ----------------------------------------------------
-
         box = check_box_breakout(
             c15,
             direction,
@@ -1304,10 +1258,6 @@ def analyze_symbol(
 
         if not box:
             continue
-
-        # ----------------------------------------------------
-        # CURRENT SIGNAL CANDLE
-        # ----------------------------------------------------
 
         signal_candle = c15[
             -1
@@ -1330,10 +1280,6 @@ def analyze_symbol(
         ):
             continue
 
-        # ----------------------------------------------------
-        # QUALITY SCORE
-        # ----------------------------------------------------
-
         score = calculate_signal_score(
             c15,
             cisd,
@@ -1346,10 +1292,6 @@ def analyze_symbol(
             < MIN_SIGNAL_SCORE
         ):
             continue
-
-        # ----------------------------------------------------
-        # CONFIRMED SIGNAL
-        # ----------------------------------------------------
 
         signals.append(
             {
@@ -1451,6 +1393,15 @@ def fmt_price(
     return f"{value:.8f}"
 
 
+# ------------------------------------------------------------
+# 15M CANDLE TIME
+#
+# Bitget candle timestamp = candle OPEN time.
+# Therefore:
+# 23:00 timestamp = 23:00 ~ 23:15 candle
+# Actual close time = 23:15
+# ------------------------------------------------------------
+
 def kst_time(
     ts: int,
 ) -> str:
@@ -1471,6 +1422,20 @@ def kst_time(
     )
 
 
+def kst_15m_close_time(
+    ts: int,
+) -> str:
+
+    close_ts = (
+        ts
+        + 15 * 60 * 1000
+    )
+
+    return kst_time(
+        close_ts
+    )
+
+
 def make_message(
     signal: Dict[str, Any],
 ) -> str:
@@ -1487,6 +1452,14 @@ def make_message(
         if signal["rvol"]
         is not None
         else "N/A"
+    )
+
+    signal_open_time = kst_time(
+        signal["signal_ts"]
+    )
+
+    signal_close_time = kst_15m_close_time(
+        signal["signal_ts"]
     )
 
     return (
@@ -1522,8 +1495,12 @@ def make_message(
         f"4H 품질: "
         f"{signal['four_hour_score']:.1f}/15\n\n"
 
-        f"신호봉 마감\n"
-        f"{kst_time(signal['signal_ts'])}"
+        f"신호봉: "
+        f"{signal_open_time} ~ "
+        f"{signal_close_time}\n"
+
+        f"신호봉 마감: "
+        f"{signal_close_time}"
     )
 
 
@@ -1711,10 +1688,6 @@ def main() -> None:
         "NO ORDERS"
     )
 
-    # --------------------------------------------------------
-    # SYMBOLS
-    # --------------------------------------------------------
-
     try:
 
         symbols = get_symbols()
@@ -1732,10 +1705,6 @@ def main() -> None:
         "[INFO] selected symbols: "
         f"{len(symbols)}"
     )
-
-    # --------------------------------------------------------
-    # SCAN
-    # --------------------------------------------------------
 
     all_signals: List[
         Dict[str, Any]
@@ -1784,10 +1753,6 @@ def main() -> None:
                     f"{done}/{len(symbols)}"
                 )
 
-    # --------------------------------------------------------
-    # SAME-RUN DE-DUPLICATION
-    # --------------------------------------------------------
-
     unique = {}
 
     for signal in all_signals:
@@ -1799,10 +1764,6 @@ def main() -> None:
     all_signals = list(
         unique.values()
     )
-
-    # --------------------------------------------------------
-    # SORT BY QUALITY
-    # --------------------------------------------------------
 
     all_signals.sort(
         key=lambda x: (
@@ -1818,10 +1779,6 @@ def main() -> None:
         f"{len(all_signals)}"
     )
 
-    # --------------------------------------------------------
-    # TOP 10 ONLY
-    # --------------------------------------------------------
-
     ranked_signals = (
         all_signals[
             :MAX_TELEGRAM_SIGNALS
@@ -1833,10 +1790,6 @@ def main() -> None:
         f"{len(ranked_signals)}"
     )
 
-    # --------------------------------------------------------
-    # STATE
-    # --------------------------------------------------------
-
     state = load_state()
 
     sent_keys = set(
@@ -1845,10 +1798,6 @@ def main() -> None:
             [],
         )
     )
-
-    # --------------------------------------------------------
-    # ONLY NEW TOP SIGNALS
-    # --------------------------------------------------------
 
     new_signals = [
         signal
@@ -1861,10 +1810,6 @@ def main() -> None:
         "[INFO] new Telegram signals: "
         f"{len(new_signals)}"
     )
-
-    # --------------------------------------------------------
-    # TELEGRAM
-    # --------------------------------------------------------
 
     for rank, signal in enumerate(
         new_signals,
@@ -1911,10 +1856,6 @@ def main() -> None:
                 "[WARN] "
                 f"Telegram failed: {exc}"
             )
-
-    # --------------------------------------------------------
-    # SAVE STATE
-    # --------------------------------------------------------
 
     save_state(
         state
