@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Structure Scanner v2.5
+Bitget 4H -> 15M Structure Scanner v2.6
 
 FLOW
 ----
@@ -16,26 +16,28 @@ FLOW
 TIMING DIAGNOSTIC
         ↓
 1H ~ 6H TIMING CANDIDATE
+        ↓
+POST-STRUCTURE PERFORMANCE DIAGNOSTIC
 
-v2.5 PURPOSE
+v2.6 PURPOSE
 -------------
-v2.4에서 확인된
-
-CISD -> Structure timing distribution을 기반으로
-1H ~ 6H 구간을 별도 진단한다.
+v2.5에서 확인한 CISD -> Structure timing을 더 세분화하고,
+Structure 발생 이후의 고정 시간대 가격 변화와
+6H 기준 MFE / MAE를 기록한다.
 
 IMPORTANT
 ---------
-4H / 15M Structure 조건은 v2.4와 동일하다.
+4H / 15M Structure 조건은 v2.5와 동일하다.
 조건 완화 없음.
 기존 24H Structure SEARCH WINDOW 유지.
 
 추가:
-- 1H ~ 6H TIMING CANDIDATE
-- LONG / SHORT timing count
-- 전체 Structure와 timing candidate 비교
+- 1-2H / 2-4H / 4-6H timing bucket
+- Structure 이후 +1H / +2H / +4H / +6H / +12H / +24H
+  방향 기준 수익률 진단
+- 6H MFE / MAE
+- JSON에 post-performance 저장
 - Telegram 4096 character 자동 분할
-- JSON에 timing_candidate 저장
 
 No trading orders are placed.
 """
@@ -104,7 +106,7 @@ MIN_CISD_BODY_RATIO = 0.30
 SWING_LEFT = 2
 SWING_RIGHT = 2
 
-# 기존 조건 그대로 유지
+# v2.5 조건 그대로 유지
 MAX_15M_STRUCTURE_BARS = 96
 
 MIN_STRUCTURE_DISTANCE = 3
@@ -113,7 +115,7 @@ MIN_STRUCTURE_BODY_RATIO = 0.25
 
 
 # ============================================================
-# v2.5 TIMING FILTER
+# v2.6 TIMING FILTER
 # ============================================================
 
 STRUCTURE_INTERVAL_MINUTES = 15
@@ -124,9 +126,24 @@ STRUCTURE_WINDOW_HOURS = (
     / 60
 )
 
-# ⭐ 실험 구간
 TIMING_MINUTES = 60
 TIMING_MAX_MINUTES = 360
+
+
+# ============================================================
+# v2.6 POST-STRUCTURE WINDOWS
+# ============================================================
+
+POST_PERFORMANCE_HOURS = (
+    1,
+    2,
+    4,
+    6,
+    12,
+    24,
+)
+
+MFE_MAE_HOURS = 6
 
 
 # ============================================================
@@ -135,8 +152,9 @@ TIMING_MAX_MINUTES = 360
 
 STRUCTURE_TIME_BUCKETS = [
     ("0-1H", 0, 60),
-    ("1-3H", 60, 180),
-    ("3-6H", 180, 360),
+    ("1-2H", 60, 120),
+    ("2-4H", 120, 240),
+    ("4-6H", 240, 360),
     ("6-12H", 360, 720),
     ("12-24H", 720, 1440),
     ("24H+", 1440, None),
@@ -178,8 +196,21 @@ class StructureCandidate:
     cisd_to_structure_minutes: float
     cisd_to_structure_hours: float
 
-    # v2.5
+    # v2.6 timing
     timing_candidate: bool
+    timing_bucket: str
+
+    # v2.6 post-structure performance
+    post_1h_pct: Optional[float]
+    post_2h_pct: Optional[float]
+    post_4h_pct: Optional[float]
+    post_6h_pct: Optional[float]
+    post_12h_pct: Optional[float]
+    post_24h_pct: Optional[float]
+
+    # v2.6 6H excursion
+    mfe_6h_pct: Optional[float]
+    mae_6h_pct: Optional[float]
 
 
 # ============================================================
@@ -204,7 +235,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h15m-structure-scanner/2.5",
+                        "bitget-4h15m-structure-scanner/2.6",
                     "Accept":
                         "application/json",
                 },
@@ -450,6 +481,22 @@ def timing_bucket(
     return "UNKNOWN"
 
 
+def timing_sub_bucket(
+    minutes: float
+) -> str:
+
+    if 60 <= minutes < 120:
+        return "1-2H"
+
+    if 120 <= minutes < 240:
+        return "2-4H"
+
+    if 240 <= minutes <= 360:
+        return "4-6H"
+
+    return "OTHER"
+
+
 def is_timing_candidate(
     minutes: float
 ) -> bool:
@@ -459,6 +506,213 @@ def is_timing_candidate(
         <= minutes
         <= TIMING_MAX_MINUTES
     )
+
+
+# ============================================================
+# POST-STRUCTURE PERFORMANCE
+# ============================================================
+
+def find_candle_at_or_after(
+    candles: List[Candle],
+    target_ts: int
+) -> Optional[Candle]:
+
+    for candle in candles:
+
+        if candle.ts >= target_ts:
+            return candle
+
+    return None
+
+
+def calculate_post_performance(
+    candles: List[Candle],
+    structure_index: int,
+    structure_ts: int,
+    direction: str
+) -> Dict[str, Optional[float]]:
+
+    """
+    Structure candle close를 기준으로 고정 시간 후 종가 수익률을 계산한다.
+
+    LONG:
+        상승 = +
+        하락 = -
+
+    SHORT:
+        하락 = +
+        상승 = -
+
+    MFE / MAE:
+        Structure 이후 최대 6H 구간의 고가/저가를 사용한다.
+        Structure candle 자체의 high/low는 제외하고
+        다음 15M candle부터 계산한다.
+    """
+
+    if (
+        structure_index < 0
+        or
+        structure_index >= len(candles)
+    ):
+
+        return {
+            "post_1h_pct": None,
+            "post_2h_pct": None,
+            "post_4h_pct": None,
+            "post_6h_pct": None,
+            "post_12h_pct": None,
+            "post_24h_pct": None,
+            "mfe_6h_pct": None,
+            "mae_6h_pct": None,
+        }
+
+    entry_price = candles[
+        structure_index
+    ].c
+
+    if entry_price <= 0:
+        return {
+            "post_1h_pct": None,
+            "post_2h_pct": None,
+            "post_4h_pct": None,
+            "post_6h_pct": None,
+            "post_12h_pct": None,
+            "post_24h_pct": None,
+            "mfe_6h_pct": None,
+            "mae_6h_pct": None,
+        }
+
+    output: Dict[str, Optional[float]] = {}
+
+    # --------------------------------------------------------
+    # Fixed-time close performance
+    # --------------------------------------------------------
+
+    for hours in POST_PERFORMANCE_HOURS:
+
+        target_ts = (
+            structure_ts
+            + hours * 60 * 60 * 1000
+        )
+
+        future_candle = (
+            find_candle_at_or_after(
+                candles,
+                target_ts
+            )
+        )
+
+        key = f"post_{hours}h_pct"
+
+        if future_candle is None:
+
+            output[key] = None
+            continue
+
+        raw_pct = (
+            (
+                future_candle.c
+                - entry_price
+            )
+            / entry_price
+            * 100
+        )
+
+        if direction == "SHORT":
+            raw_pct = -raw_pct
+
+        output[key] = raw_pct
+
+    # --------------------------------------------------------
+    # 6H MFE / MAE
+    # --------------------------------------------------------
+
+    mfe_end_ts = (
+        structure_ts
+        + MFE_MAE_HOURS
+        * 60
+        * 60
+        * 1000
+    )
+
+    future_candles = [
+        candle
+        for candle in candles[
+            structure_index + 1:
+        ]
+        if candle.ts <= mfe_end_ts
+    ]
+
+    if not future_candles:
+
+        output["mfe_6h_pct"] = None
+        output["mae_6h_pct"] = None
+
+        return output
+
+    if direction == "LONG":
+
+        max_high = max(
+            candle.h
+            for candle in future_candles
+        )
+
+        min_low = min(
+            candle.l
+            for candle in future_candles
+        )
+
+        output["mfe_6h_pct"] = (
+            (
+                max_high
+                - entry_price
+            )
+            / entry_price
+            * 100
+        )
+
+        output["mae_6h_pct"] = (
+            (
+                min_low
+                - entry_price
+            )
+            / entry_price
+            * 100
+        )
+
+    else:
+
+        min_low = min(
+            candle.l
+            for candle in future_candles
+        )
+
+        max_high = max(
+            candle.h
+            for candle in future_candles
+        )
+
+        # SHORT에서 가격 하락이 유리
+        output["mfe_6h_pct"] = (
+            (
+                entry_price
+                - min_low
+            )
+            / entry_price
+            * 100
+        )
+
+        # SHORT에서 가격 상승이 불리
+        output["mae_6h_pct"] = (
+            (
+                entry_price
+                - max_high
+            )
+            / entry_price
+            * 100
+        )
+
+    return output
 
 
 # ============================================================
@@ -869,6 +1123,112 @@ def find_structure_break(
 
 
 # ============================================================
+# CANDIDATE BUILDER
+# ============================================================
+
+def build_candidate(
+    symbol: str,
+    direction: str,
+    sweep: Dict[str, Any],
+    cisd: Dict[str, Any],
+    structure: Dict[str, Any],
+    c15: List[Candle]
+) -> StructureCandidate:
+
+    elapsed_minutes = (
+        minutes_between(
+            cisd["ts"],
+            structure["ts"]
+        )
+    )
+
+    elapsed_hours = (
+        hours_between(
+            cisd["ts"],
+            structure["ts"]
+        )
+    )
+
+    timing_candidate = (
+        is_timing_candidate(
+            elapsed_minutes
+        )
+    )
+
+    timing_bucket_name = (
+        timing_sub_bucket(
+            elapsed_minutes
+        )
+    )
+
+    post = calculate_post_performance(
+        c15,
+        structure["index"],
+        structure["ts"],
+        direction
+    )
+
+    return StructureCandidate(
+
+        symbol=symbol,
+
+        direction=direction,
+
+        sweep_ts=sweep["ts"],
+
+        sweep_level=sweep["level"],
+
+        cisd_ts=cisd["ts"],
+
+        cisd_level=cisd["level"],
+
+        structure_ts=structure["ts"],
+
+        structure_level=structure["level"],
+
+        swing_ts=structure["swing_ts"],
+
+        current_price=c15[-1].c,
+
+        cisd_to_structure_minutes=
+            elapsed_minutes,
+
+        cisd_to_structure_hours=
+            elapsed_hours,
+
+        timing_candidate=
+            timing_candidate,
+
+        timing_bucket=
+            timing_bucket_name,
+
+        post_1h_pct=
+            post["post_1h_pct"],
+
+        post_2h_pct=
+            post["post_2h_pct"],
+
+        post_4h_pct=
+            post["post_4h_pct"],
+
+        post_6h_pct=
+            post["post_6h_pct"],
+
+        post_12h_pct=
+            post["post_12h_pct"],
+
+        post_24h_pct=
+            post["post_24h_pct"],
+
+        mfe_6h_pct=
+            post["mfe_6h_pct"],
+
+        mae_6h_pct=
+            post["mae_6h_pct"],
+    )
+
+
+# ============================================================
 # SYMBOL ANALYSIS
 # ============================================================
 
@@ -1153,66 +1513,15 @@ def analyze_symbol(
                         "long_event_data"
                     ]["cisd"]
 
-                    elapsed_minutes = (
-                        minutes_between(
-                            cisd["ts"],
-                            structure["ts"]
-                        )
-                    )
-
-                    elapsed_hours = (
-                        hours_between(
-                            cisd["ts"],
-                            structure["ts"]
-                        )
-                    )
-
-                    timing_candidate = (
-                        is_timing_candidate(
-                            elapsed_minutes
-                        )
-                    )
-
                     result[
                         "long_candidate"
-                    ] = StructureCandidate(
-
-                        symbol=symbol,
-
-                        direction="LONG",
-
-                        sweep_ts=
-                            sweep["ts"],
-
-                        sweep_level=
-                            sweep["level"],
-
-                        cisd_ts=
-                            cisd["ts"],
-
-                        cisd_level=
-                            cisd["level"],
-
-                        structure_ts=
-                            structure["ts"],
-
-                        structure_level=
-                            structure["level"],
-
-                        swing_ts=
-                            structure["swing_ts"],
-
-                        current_price=
-                            c15[-1].c,
-
-                        cisd_to_structure_minutes=
-                            elapsed_minutes,
-
-                        cisd_to_structure_hours=
-                            elapsed_hours,
-
-                        timing_candidate=
-                            timing_candidate,
+                    ] = build_candidate(
+                        symbol,
+                        "LONG",
+                        sweep,
+                        cisd,
+                        structure,
+                        c15
                     )
 
                 else:
@@ -1291,66 +1600,15 @@ def analyze_symbol(
                         "short_event_data"
                     ]["cisd"]
 
-                    elapsed_minutes = (
-                        minutes_between(
-                            cisd["ts"],
-                            structure["ts"]
-                        )
-                    )
-
-                    elapsed_hours = (
-                        hours_between(
-                            cisd["ts"],
-                            structure["ts"]
-                        )
-                    )
-
-                    timing_candidate = (
-                        is_timing_candidate(
-                            elapsed_minutes
-                        )
-                    )
-
                     result[
                         "short_candidate"
-                    ] = StructureCandidate(
-
-                        symbol=symbol,
-
-                        direction="SHORT",
-
-                        sweep_ts=
-                            sweep["ts"],
-
-                        sweep_level=
-                            sweep["level"],
-
-                        cisd_ts=
-                            cisd["ts"],
-
-                        cisd_level=
-                            cisd["level"],
-
-                        structure_ts=
-                            structure["ts"],
-
-                        structure_level=
-                            structure["level"],
-
-                        swing_ts=
-                            structure["swing_ts"],
-
-                        current_price=
-                            c15[-1].c,
-
-                        cisd_to_structure_minutes=
-                            elapsed_minutes,
-
-                        cisd_to_structure_hours=
-                            elapsed_hours,
-
-                        timing_candidate=
-                            timing_candidate,
+                    ] = build_candidate(
+                        symbol,
+                        "SHORT",
+                        sweep,
+                        cisd,
+                        structure,
+                        c15
                     )
 
                 else:
@@ -1418,8 +1676,19 @@ def format_elapsed(
     )
 
 
+def format_pct(
+    value: Optional[float]
+) -> str:
+
+    if value is None:
+        return "N/A"
+
+    return f"{value:+.2f}%"
+
+
 def format_candidate(
-    c: StructureCandidate
+    c: StructureCandidate,
+    include_performance: bool = True
 ) -> str:
 
     icon = (
@@ -1438,32 +1707,79 @@ def format_candidate(
         else ""
     )
 
-    return (
+    lines = [
+
         f"{icon} {c.symbol} "
-        f"{c.direction}{timing_mark}\n"
+        f"{c.direction}{timing_mark}",
 
         f"4H Sweep: "
         f"{fmt_price(c.sweep_level)} "
-        f"({short_ts(c.sweep_ts)})\n"
+        f"({short_ts(c.sweep_ts)})",
 
         f"4H CISD: "
         f"{fmt_price(c.cisd_level)} "
-        f"({short_ts(c.cisd_ts)})\n"
+        f"({short_ts(c.cisd_ts)})",
 
         f"15M Structure: "
         f"{fmt_price(c.structure_level)} "
-        f"({short_ts(c.structure_ts)})\n"
+        f"({short_ts(c.structure_ts)})",
 
         f"15M Swing: "
-        f"{short_ts(c.swing_ts)}\n"
+        f"{short_ts(c.swing_ts)}",
 
         f"CISD → Structure: "
         f"{format_elapsed(c.cisd_to_structure_minutes)} "
-        f"[{bucket}]\n"
+        f"[{bucket}]",
+    ]
 
+    if c.timing_candidate:
+
+        lines.append(
+            f"Timing Zone: "
+            f"{c.timing_bucket}"
+        )
+
+    lines.append(
         f"현재가: "
         f"{fmt_price(c.current_price)}"
     )
+
+    if include_performance:
+
+        lines += [
+
+            "",
+
+            "📊 POST STRUCTURE",
+
+            f"+1H  : "
+            f"{format_pct(c.post_1h_pct)}",
+
+            f"+2H  : "
+            f"{format_pct(c.post_2h_pct)}",
+
+            f"+4H  : "
+            f"{format_pct(c.post_4h_pct)}",
+
+            f"+6H  : "
+            f"{format_pct(c.post_6h_pct)}",
+
+            f"+12H : "
+            f"{format_pct(c.post_12h_pct)}",
+
+            f"+24H : "
+            f"{format_pct(c.post_24h_pct)}",
+
+            "",
+
+            f"MFE 6H: "
+            f"{format_pct(c.mfe_6h_pct)}",
+
+            f"MAE 6H: "
+            f"{format_pct(c.mae_6h_pct)}",
+        ]
+
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -1533,6 +1849,126 @@ def build_timing_distribution(
         lines.append(
             f"   └ 최대   : "
             f"{format_elapsed(max_minutes)}"
+        )
+
+    return lines
+
+
+# ============================================================
+# POST PERFORMANCE DISTRIBUTION
+# ============================================================
+
+def avg_optional(
+    values: List[Optional[float]]
+) -> Optional[float]:
+
+    valid = [
+        x for x in values
+        if x is not None
+    ]
+
+    if not valid:
+        return None
+
+    return (
+        sum(valid)
+        /
+        len(valid)
+    )
+
+
+def build_performance_summary(
+    candidates: List[StructureCandidate],
+    direction: str
+) -> List[str]:
+
+    filtered = [
+        c
+        for c in candidates
+        if c.direction == direction
+        and c.timing_candidate
+    ]
+
+    lines = []
+
+    if not filtered:
+
+        lines.append(
+            "   └ 데이터 없음"
+        )
+
+        return lines
+
+    timing_groups = [
+        "1-2H",
+        "2-4H",
+        "4-6H",
+    ]
+
+    for group in timing_groups:
+
+        group_candidates = [
+            c
+            for c in filtered
+            if c.timing_bucket == group
+        ]
+
+        if not group_candidates:
+
+            lines.append(
+                f"   └ {group:<4}: 0"
+            )
+
+            continue
+
+        p1 = avg_optional([
+            c.post_1h_pct
+            for c in group_candidates
+        ])
+
+        p2 = avg_optional([
+            c.post_2h_pct
+            for c in group_candidates
+        ])
+
+        p4 = avg_optional([
+            c.post_4h_pct
+            for c in group_candidates
+        ])
+
+        p6 = avg_optional([
+            c.post_6h_pct
+            for c in group_candidates
+        ])
+
+        mfe = avg_optional([
+            c.mfe_6h_pct
+            for c in group_candidates
+        ])
+
+        mae = avg_optional([
+            c.mae_6h_pct
+            for c in group_candidates
+        ])
+
+        lines.append(
+            f"   └ {group:<4}: "
+            f"N={len(group_candidates)}"
+        )
+
+        lines.append(
+            f"      +1H {format_pct(p1)} | "
+            f"+2H {format_pct(p2)}"
+        )
+
+        lines.append(
+            f"      +4H {format_pct(p4)} | "
+            f"+6H {format_pct(p6)}"
+        )
+
+        lines.append(
+            f"      MFE {format_pct(mfe)} | "
+            f"MAE {format_pct(mae)}"
         )
 
     return lines
@@ -1675,7 +2111,7 @@ def build_report(
 
     lines = [
 
-        "🔎 4H→15M Structure Scanner v2.5",
+        "🔎 4H→15M Structure Scanner v2.6",
 
         now,
 
@@ -1687,7 +2123,7 @@ def build_report(
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
-        "🔬 v2.5 TIMING DIAGNOSTIC",
+        "🔬 v2.6 TIMING + PERFORMANCE",
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
@@ -1786,51 +2222,48 @@ def build_report(
 
         "",
 
-        f"⚠️ API/분석 오류 : "
+        "⑦ 📊 POST-STRUCTURE AVG",
+
+        "   방향 기준 수익률",
+
+        "",
+
+        "   LONG",
+
+    ]
+
+    lines += build_performance_summary(
+        candidates,
+        "LONG"
+    )
+
+    lines += [
+        "",
+        "   SHORT",
+    ]
+
+    lines += build_performance_summary(
+        candidates,
+        "SHORT"
+    )
+
+    lines += [
+
+        "",
+
+        "⚠️ API/분석 오류 : "
         f"{errors}",
 
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
     # ========================================================
-    # CANDIDATES
-    # ========================================================
-
-    if candidates:
-
-        lines += [
-            "",
-            "🔥 ALL STRUCTURE CANDIDATES",
-            ""
-        ]
-
-        for candidate in sorted(
-            candidates,
-            key=lambda x: (
-                x.cisd_to_structure_minutes,
-                x.symbol,
-                x.direction
-            )
-        )[:20]:
-
-            lines.append(
-                format_candidate(
-                    candidate
-                )
-            )
-
-            lines.append(
-                "────────────────"
-            )
-
-    # ========================================================
-    # TIMING CANDIDATES
+    # TIMING CANDIDATES ONLY
     # ========================================================
 
     if timing_candidates:
 
         lines += [
-            "",
             "",
             "⭐ TIMING CANDIDATES 1-6H",
             "",
@@ -1847,7 +2280,8 @@ def build_report(
 
             lines.append(
                 format_candidate(
-                    candidate
+                    candidate,
+                    include_performance=True
                 )
             )
 
@@ -1930,7 +2364,6 @@ def split_telegram_text(
 
     for line in text.split("\n"):
 
-        # 한 줄 자체가 너무 긴 경우
         if len(line) > max_length:
 
             if current:
@@ -2044,7 +2477,6 @@ def send_telegram(
 
             resp.read()
 
-        # Telegram rate-limit 여유
         if index < len(chunks):
 
             time.sleep(0.5)
@@ -2105,7 +2537,7 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v2.5\n"
+        " Bitget 4H -> 15M Structure Scanner v2.6\n"
         "============================================\n"
     )
 
@@ -2127,7 +2559,17 @@ def main() -> None:
 
     print(
         "TIMING EXPERIMENT: "
-        "1H ~ 6H"
+        "1-2H / 2-4H / 4-6H"
+    )
+
+    print(
+        "POST PERFORMANCE: "
+        "+1H / +2H / +4H / +6H / +12H / +24H"
+    )
+
+    print(
+        "MFE / MAE WINDOW: "
+        "6H"
     )
 
     print(
