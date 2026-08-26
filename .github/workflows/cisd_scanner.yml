@@ -2,9 +2,11 @@ name: Bitget 4H 15M CISD Scanner
 
 on:
   workflow_dispatch:
-  
+
   schedule:
-    - cron: "1,16,31,46 * * * *"
+    # GitHub Actions는 UTC 기준
+    # 5분마다 실행을 시도
+    - cron: "*/5 * * * *"
 
 jobs:
   scan:
@@ -20,10 +22,43 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+
+      - name: Check 15M scan window
+        id: window
+        run: |
+          MINUTE=$(date -u +%M)
+          MINUTE=$((10#$MINUTE))
+
+          echo "UTC minute: $MINUTE"
+
+          if [ "$MINUTE" -ge 0 ] && [ "$MINUTE" -le 4 ]; then
+            echo "scan=true" >> "$GITHUB_OUTPUT"
+            echo "15M scan window: 00분 봉"
+          elif [ "$MINUTE" -ge 15 ] && [ "$MINUTE" -le 19 ]; then
+            echo "scan=true" >> "$GITHUB_OUTPUT"
+            echo "15M scan window: 15분 봉"
+          elif [ "$MINUTE" -ge 30 ] && [ "$MINUTE" -le 34 ]; then
+            echo "scan=true" >> "$GITHUB_OUTPUT"
+            echo "15M scan window: 30분 봉"
+          elif [ "$MINUTE" -ge 45 ] && [ "$MINUTE" -le 49 ]; then
+            echo "scan=true" >> "$GITHUB_OUTPUT"
+            echo "15M scan window: 45분 봉"
+          else
+            echo "scan=false" >> "$GITHUB_OUTPUT"
+            echo "현재는 CISD 스캔 시간이 아닙니다."
+          fi
 
       - name: Run CISD scanner
+        if: steps.window.outputs.scan == 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bitget_4h_15m_cisd_scanner.py
+        run: |
+          python bitget_4h_15m_cisd_scanner.py
+
+      - name: Skip scan
+        if: steps.window.outputs.scan != 'true'
+        run: |
+          echo "⏭️ 이번 실행에서는 CISD 스캔을 하지 않습니다."
