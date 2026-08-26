@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Structure Scanner v2.4
+Bitget 4H -> 15M Structure Scanner v2.5
 
 FLOW
 ----
@@ -13,30 +13,29 @@ FLOW
         ↓
 15M Swing Structure Break
         ↓
-15M STRUCTURE CANDIDATE
+TIMING DIAGNOSTIC
+        ↓
+1H ~ 6H TIMING CANDIDATE
 
-v2.4 PURPOSE
+v2.5 PURPOSE
 -------------
-v2.3에서 수정된 15M API 문제를 유지하면서
-4H CISD -> 15M Structure 연결 시간을 정밀 진단한다.
+v2.4에서 확인된
+
+CISD -> Structure timing distribution을 기반으로
+1H ~ 6H 구간을 별도 진단한다.
 
 IMPORTANT
 ---------
-4H / 15M Structure 조건은 v2.3과 동일하다.
+4H / 15M Structure 조건은 v2.4와 동일하다.
 조건 완화 없음.
+기존 24H Structure SEARCH WINDOW 유지.
 
-추가 진단:
-- 4H CISD -> 15M Structure 경과시간
-- LONG / SHORT 구조 발생 시간 분포
-- Structure 탐색 가능 여부
-- Structure 검색 window 진단
-- Candidate에 경과시간 표시
-- JSON에 경과시간 저장
-
-15M Structure SEARCH WINDOW
----------------------------
-MAX_15M_STRUCTURE_BARS = 96
-= 최대 24시간
+추가:
+- 1H ~ 6H TIMING CANDIDATE
+- LONG / SHORT timing count
+- 전체 Structure와 timing candidate 비교
+- Telegram 4096 character 자동 분할
+- JSON에 timing_candidate 저장
 
 No trading orders are placed.
 """
@@ -67,8 +66,6 @@ BASE_URL = "https://api.bitget.com"
 PRODUCT_TYPE = "USDT-FUTURES"
 
 HISTORY_LIMIT_4H = 200
-
-# Bitget history-candles API maximum
 HISTORY_LIMIT_15M = 200
 
 MAX_WORKERS = 8
@@ -107,6 +104,7 @@ MIN_CISD_BODY_RATIO = 0.30
 SWING_LEFT = 2
 SWING_RIGHT = 2
 
+# 기존 조건 그대로 유지
 MAX_15M_STRUCTURE_BARS = 96
 
 MIN_STRUCTURE_DISTANCE = 3
@@ -115,7 +113,7 @@ MIN_STRUCTURE_BODY_RATIO = 0.25
 
 
 # ============================================================
-# STRUCTURE TIMING DIAGNOSTIC
+# v2.5 TIMING FILTER
 # ============================================================
 
 STRUCTURE_INTERVAL_MINUTES = 15
@@ -125,6 +123,15 @@ STRUCTURE_WINDOW_HOURS = (
     * STRUCTURE_INTERVAL_MINUTES
     / 60
 )
+
+# ⭐ 실험 구간
+TIMING_MINUTES = 60
+TIMING_MAX_MINUTES = 360
+
+
+# ============================================================
+# TIMING BUCKETS
+# ============================================================
 
 STRUCTURE_TIME_BUCKETS = [
     ("0-1H", 0, 60),
@@ -168,9 +175,11 @@ class StructureCandidate:
 
     current_price: float
 
-    # v2.4 timing diagnostic
     cisd_to_structure_minutes: float
     cisd_to_structure_hours: float
+
+    # v2.5
+    timing_candidate: bool
 
 
 # ============================================================
@@ -195,7 +204,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h15m-structure-scanner/2.4",
+                        "bitget-4h15m-structure-scanner/2.5",
                     "Accept":
                         "application/json",
                 },
@@ -441,6 +450,17 @@ def timing_bucket(
     return "UNKNOWN"
 
 
+def is_timing_candidate(
+    minutes: float
+) -> bool:
+
+    return (
+        TIMING_MINUTES
+        <= minutes
+        <= TIMING_MAX_MINUTES
+    )
+
+
 # ============================================================
 # 4H LIQUIDITY SWEEP
 # ============================================================
@@ -475,9 +495,7 @@ def find_latest_sweep(
         if not previous:
             continue
 
-        # LONG:
-        # 이전 저점을 아래로 훑은 후
-        # 다시 그 위에서 마감
+        # LONG
         if direction == "LONG":
 
             prior_low = min(
@@ -496,9 +514,7 @@ def find_latest_sweep(
                     "level": prior_low,
                 }
 
-        # SHORT:
-        # 이전 고점을 위로 훑은 후
-        # 다시 그 아래에서 마감
+        # SHORT
         else:
 
             prior_high = max(
@@ -873,10 +889,14 @@ def analyze_symbol(
         "long_candidate": None,
         "short_candidate": None,
 
-        "fifteen_min_status": "NOT_REQUESTED",
+        "fifteen_min_status":
+            "NOT_REQUESTED",
 
-        "long_structure_status": "NOT_CHECKED",
-        "short_structure_status": "NOT_CHECKED",
+        "long_structure_status":
+            "NOT_CHECKED",
+
+        "short_structure_status":
+            "NOT_CHECKED",
 
         "error_stage": None,
         "error": None,
@@ -955,7 +975,10 @@ def analyze_symbol(
 
     except Exception as exc:
 
-        result["error_stage"] = "4H_LONG_EVENT"
+        result["error_stage"] = (
+            "4H_LONG_EVENT"
+        )
+
         result["error"] = str(exc)
 
         return result
@@ -1004,16 +1027,16 @@ def analyze_symbol(
 
     except Exception as exc:
 
-        result["error_stage"] = "4H_SHORT_EVENT"
+        result["error_stage"] = (
+            "4H_SHORT_EVENT"
+        )
+
         result["error"] = str(exc)
 
         return result
 
     # ========================================================
-    # IMPORTANT
-    #
-    # 4H EVENT가 하나도 없으면
-    # 15M API를 호출하지 않는다.
+    # 4H EVENT가 없으면 15M API 호출 안 함
     # ========================================================
 
     if not (
@@ -1046,7 +1069,10 @@ def analyze_symbol(
             "fifteen_min_status"
         ] = "ERROR"
 
-        result["error_stage"] = "15M_CANDLES"
+        result["error_stage"] = (
+            "15M_CANDLES"
+        )
+
         result["error"] = str(exc)
 
         return result
@@ -1057,7 +1083,9 @@ def analyze_symbol(
             "fifteen_min_status"
         ] = "ERROR"
 
-        result["error_stage"] = "15M_DATA_LENGTH"
+        result["error_stage"] = (
+            "15M_DATA_LENGTH"
+        )
 
         result["error"] = (
             f"15M candles={len(c15)}"
@@ -1066,7 +1094,7 @@ def analyze_symbol(
         return result
 
     # ========================================================
-    # LONG 15M STRUCTURE
+    # LONG STRUCTURE
     # ========================================================
 
     if result["long_event"]:
@@ -1139,6 +1167,12 @@ def analyze_symbol(
                         )
                     )
 
+                    timing_candidate = (
+                        is_timing_candidate(
+                            elapsed_minutes
+                        )
+                    )
+
                     result[
                         "long_candidate"
                     ] = StructureCandidate(
@@ -1176,6 +1210,9 @@ def analyze_symbol(
 
                         cisd_to_structure_hours=
                             elapsed_hours,
+
+                        timing_candidate=
+                            timing_candidate,
                     )
 
                 else:
@@ -1195,7 +1232,7 @@ def analyze_symbol(
             return result
 
     # ========================================================
-    # SHORT 15M STRUCTURE
+    # SHORT STRUCTURE
     # ========================================================
 
     if result["short_event"]:
@@ -1268,6 +1305,12 @@ def analyze_symbol(
                         )
                     )
 
+                    timing_candidate = (
+                        is_timing_candidate(
+                            elapsed_minutes
+                        )
+                    )
+
                     result[
                         "short_candidate"
                     ] = StructureCandidate(
@@ -1305,6 +1348,9 @@ def analyze_symbol(
 
                         cisd_to_structure_hours=
                             elapsed_hours,
+
+                        timing_candidate=
+                            timing_candidate,
                     )
 
                 else:
@@ -1386,9 +1432,15 @@ def format_candidate(
         c.cisd_to_structure_minutes
     )
 
+    timing_mark = (
+        " ⭐ TIMING 1-6H"
+        if c.timing_candidate
+        else ""
+    )
+
     return (
         f"{icon} {c.symbol} "
-        f"{c.direction}\n"
+        f"{c.direction}{timing_mark}\n"
 
         f"4H Sweep: "
         f"{fmt_price(c.sweep_level)} "
@@ -1415,65 +1467,7 @@ def format_candidate(
 
 
 # ============================================================
-# TELEGRAM
-# ============================================================
-
-def send_telegram(
-    text: str
-) -> None:
-
-    token = os.getenv(
-        "TELEGRAM_BOT_TOKEN",
-        ""
-    ).strip()
-
-    chat_id = os.getenv(
-        "TELEGRAM_CHAT_ID",
-        ""
-    ).strip()
-
-    if not token or not chat_id:
-
-        print(
-            "[INFO] Telegram secrets "
-            "are not set."
-        )
-
-        return
-
-    url = (
-        "https://api.telegram.org/"
-        f"bot{token}/sendMessage"
-    )
-
-    payload = urlencode(
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "disable_web_page_preview": "true",
-        }
-    ).encode()
-
-    req = Request(
-        url,
-        data=payload,
-        headers={
-            "Content-Type":
-                "application/x-www-form-urlencoded"
-        },
-        method="POST",
-    )
-
-    with urlopen(
-        req,
-        timeout=REQUEST_TIMEOUT
-    ) as resp:
-
-        resp.read()
-
-
-# ============================================================
-# TIMING DIAGNOSTIC
+# TIMING DISTRIBUTION
 # ============================================================
 
 def build_timing_distribution(
@@ -1593,6 +1587,28 @@ def build_report(
     )
 
     # ========================================================
+    # TIMING CANDIDATES
+    # ========================================================
+
+    timing_candidates = [
+        c
+        for c in candidates
+        if c.timing_candidate
+    ]
+
+    timing_long = [
+        c
+        for c in timing_candidates
+        if c.direction == "LONG"
+    ]
+
+    timing_short = [
+        c
+        for c in timing_candidates
+        if c.direction == "SHORT"
+    ]
+
+    # ========================================================
     # 15M DATA STATUS
     # ========================================================
 
@@ -1642,9 +1658,24 @@ def build_report(
         == "INSUFFICIENT_TIME_WINDOW"
     ]
 
+    # ========================================================
+    # TIMING RATE
+    # ========================================================
+
+    total_structure_count = len(candidates)
+
+    timing_rate = (
+        len(timing_candidates)
+        /
+        total_structure_count
+        * 100
+        if total_structure_count
+        else 0
+    )
+
     lines = [
 
-        "🔎 4H→15M Structure Scanner v2.4",
+        "🔎 4H→15M Structure Scanner v2.5",
 
         now,
 
@@ -1656,7 +1687,7 @@ def build_report(
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
-        "🔬 v2.4 DIAGNOSTIC",
+        "🔬 v2.5 TIMING DIAGNOSTIC",
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
@@ -1680,13 +1711,16 @@ def build_report(
 
         "",
 
-        "③ 15M Structure",
+        "③ 15M STRUCTURE",
 
         f"   └ LONG  : "
         f"{len(long_structure)}",
 
         f"   └ SHORT : "
         f"{len(short_structure)}",
+
+        f"   └ TOTAL : "
+        f"{len(candidates)}",
 
         "",
 
@@ -1731,12 +1765,103 @@ def build_report(
     )
 
     lines += [
+
         "",
+
+        "⑥ ⭐ TIMING 1-6H",
+
+        "   └ RANGE : 1H ~ 6H",
+
+        f"   └ LONG  : "
+        f"{len(timing_long)}",
+
+        f"   └ SHORT : "
+        f"{len(timing_short)}",
+
+        f"   └ TOTAL : "
+        f"{len(timing_candidates)}",
+
+        f"   └ RATE  : "
+        f"{timing_rate:.1f}%",
+
+        "",
+
         f"⚠️ API/분석 오류 : "
         f"{errors}",
 
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
+
+    # ========================================================
+    # CANDIDATES
+    # ========================================================
+
+    if candidates:
+
+        lines += [
+            "",
+            "🔥 ALL STRUCTURE CANDIDATES",
+            ""
+        ]
+
+        for candidate in sorted(
+            candidates,
+            key=lambda x: (
+                x.cisd_to_structure_minutes,
+                x.symbol,
+                x.direction
+            )
+        )[:20]:
+
+            lines.append(
+                format_candidate(
+                    candidate
+                )
+            )
+
+            lines.append(
+                "────────────────"
+            )
+
+    # ========================================================
+    # TIMING CANDIDATES
+    # ========================================================
+
+    if timing_candidates:
+
+        lines += [
+            "",
+            "",
+            "⭐ TIMING CANDIDATES 1-6H",
+            "",
+        ]
+
+        for candidate in sorted(
+            timing_candidates,
+            key=lambda x: (
+                x.cisd_to_structure_minutes,
+                x.symbol,
+                x.direction
+            )
+        )[:20]:
+
+            lines.append(
+                format_candidate(
+                    candidate
+                )
+            )
+
+            lines.append(
+                "────────────────"
+            )
+
+    else:
+
+        lines += [
+            "",
+            "",
+            "⭐ 1-6H TIMING CANDIDATE 없음",
+        ]
 
     # ========================================================
     # ERROR DIAGNOSTIC
@@ -1781,49 +1906,192 @@ def build_report(
                 f"{len(error_items) - 10}개"
             )
 
-    # ========================================================
-    # CANDIDATES
-    # ========================================================
-
-    if candidates:
-
-        lines += [
-            "",
-            "🔥 STRUCTURE CANDIDATES",
-            ""
-        ]
-
-        for candidate in sorted(
-            candidates,
-            key=lambda x: (
-                x.cisd_to_structure_minutes,
-                x.symbol,
-                x.direction
-            )
-        )[:20]:
-
-            lines.append(
-                format_candidate(
-                    candidate
-                )
-            )
-
-            lines.append(
-                "────────────────"
-            )
-
-    else:
-
-        lines += [
-            "",
-            "🔥 유효 15M Structure 후보 없음",
-            "",
-            "다음 단계:",
-            "4H CISD → 15M Structure "
-            "연결 시간 분포 확인",
-        ]
-
     return "\n".join(lines)
+
+
+# ============================================================
+# TELEGRAM
+# ============================================================
+
+TELEGRAM_MAX_LENGTH = 4000
+
+
+def split_telegram_text(
+    text: str,
+    max_length: int = TELEGRAM_MAX_LENGTH
+) -> List[str]:
+
+    if len(text) <= max_length:
+        return [text]
+
+    chunks = []
+
+    current = ""
+
+    for line in text.split("\n"):
+
+        # 한 줄 자체가 너무 긴 경우
+        if len(line) > max_length:
+
+            if current:
+                chunks.append(
+                    current.rstrip()
+                )
+                current = ""
+
+            for i in range(
+                0,
+                len(line),
+                max_length
+            ):
+
+                chunks.append(
+                    line[i:i + max_length]
+                )
+
+            continue
+
+        proposed = (
+            current
+            + line
+            + "\n"
+        )
+
+        if len(proposed) > max_length:
+
+            if current:
+                chunks.append(
+                    current.rstrip()
+                )
+
+            current = line + "\n"
+
+        else:
+
+            current = proposed
+
+    if current:
+        chunks.append(
+            current.rstrip()
+        )
+
+    return chunks
+
+
+def send_telegram(
+    text: str
+) -> None:
+
+    token = os.getenv(
+        "TELEGRAM_BOT_TOKEN",
+        ""
+    ).strip()
+
+    chat_id = os.getenv(
+        "TELEGRAM_CHAT_ID",
+        ""
+    ).strip()
+
+    if not token or not chat_id:
+
+        print(
+            "[INFO] Telegram secrets "
+            "are not set."
+        )
+
+        return
+
+    chunks = split_telegram_text(text)
+
+    print(
+        f"[INFO] Telegram messages: "
+        f"{len(chunks)}"
+    )
+
+    url = (
+        "https://api.telegram.org/"
+        f"bot{token}/sendMessage"
+    )
+
+    for index, chunk in enumerate(
+        chunks,
+        start=1
+    ):
+
+        payload = urlencode(
+            {
+                "chat_id": chat_id,
+                "text": chunk,
+                "disable_web_page_preview":
+                    "true",
+            }
+        ).encode()
+
+        req = Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type":
+                    "application/x-www-form-urlencoded"
+            },
+            method="POST",
+        )
+
+        with urlopen(
+            req,
+            timeout=REQUEST_TIMEOUT
+        ) as resp:
+
+            resp.read()
+
+        # Telegram rate-limit 여유
+        if index < len(chunks):
+
+            time.sleep(0.5)
+
+
+# ============================================================
+# JSON
+# ============================================================
+
+def save_json(
+    diagnostics: List[Dict[str, Any]]
+) -> None:
+
+    json_results = []
+
+    for item in diagnostics:
+
+        for key in (
+            "long_candidate",
+            "short_candidate"
+        ):
+
+            candidate = item.get(key)
+
+            if candidate:
+
+                json_results.append(
+                    asdict(candidate)
+                )
+
+    with open(
+        "structure_scan_results.json",
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            json_results,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    print(
+        f"[INFO] JSON candidates saved: "
+        f"{len(json_results)}"
+    )
 
 
 # ============================================================
@@ -1837,7 +2105,7 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v2.4\n"
+        " Bitget 4H -> 15M Structure Scanner v2.5\n"
         "============================================\n"
     )
 
@@ -1853,8 +2121,13 @@ def main() -> None:
     )
 
     print(
-        "STRUCTURE WINDOW: "
+        "STRUCTURE SEARCH WINDOW: "
         f"{STRUCTURE_WINDOW_HOURS:.0f}H"
+    )
+
+    print(
+        "TIMING EXPERIMENT: "
+        "1H ~ 6H"
     )
 
     print(
@@ -1929,6 +2202,7 @@ def main() -> None:
                 )
 
                 if result.get("error"):
+
                     errors += 1
 
                     print(
@@ -1944,27 +2218,40 @@ def main() -> None:
                 errors += 1
 
                 diagnostics.append({
-                    "symbol": symbol,
+
+                    "symbol":
+                        symbol,
+
                     "error_stage":
                         "WORKER",
+
                     "error":
                         str(exc),
+
                     "long_event":
                         False,
+
                     "short_event":
                         False,
+
                     "long_structure":
                         False,
+
                     "short_structure":
                         False,
+
                     "long_candidate":
                         None,
+
                     "short_candidate":
                         None,
+
                     "fifteen_min_status":
                         "ERROR",
+
                     "long_structure_status":
                         "NOT_CHECKED",
+
                     "short_structure_status":
                         "NOT_CHECKED",
                 })
@@ -2018,34 +2305,18 @@ def main() -> None:
     # JSON
     # ========================================================
 
-    json_results = []
+    try:
 
-    for item in diagnostics:
+        save_json(
+            diagnostics
+        )
 
-        for key in (
-            "long_candidate",
-            "short_candidate"
-        ):
+    except Exception as exc:
 
-            candidate = item.get(key)
-
-            if candidate:
-
-                json_results.append(
-                    asdict(candidate)
-                )
-
-    with open(
-        "structure_scan_results.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            json_results,
-            f,
-            ensure_ascii=False,
-            indent=2,
+        print(
+            f"[WARN] JSON save failed: "
+            f"{exc}",
+            file=sys.stderr
         )
 
     # ========================================================
