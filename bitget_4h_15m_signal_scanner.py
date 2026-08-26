@@ -1,31 +1,38 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Signal Scanner
+Bitget 4H -> 15M Ranked Signal Scanner
 
-PURPOSE
--------
-Production-style signal scanner based on the validated v2.6 flow:
-
+FLOW
+----
 4H Liquidity Sweep
         ↓
 4H CISD
         ↓
 4H Recency
         ↓
-15M Structure Break
+15M CURRENT CLOSED candle structure break
         ↓
-15M CURRENT CLOSED candle confirmation
+Box / Fake-breakout filter
         ↓
-Telegram signal
+Signal quality score
+        ↓
+Minimum score filter
+        ↓
+TOP 10
+        ↓
+Telegram
 
 IMPORTANT
 ---------
-- Existing v2.6 scanner is NOT modified by this file.
-- ONLY the latest CLOSED 15M candle can generate a new signal.
-- Historical 15M structure breaks are NOT replayed as new signals.
+- Existing v2.6 scanner is NOT modified.
+- Only the latest CLOSED 15M candle can generate a signal.
+- Historical 15M structure breaks are NOT replayed.
+- Absolute volume is NOT used for ranking.
+- Relative Volume (RVOL) is used instead.
+- Maximum 10 signals are sent.
+- Signals below minimum score are rejected.
 - No trading orders are placed.
-- Telegram receives ONLY newly confirmed signals.
 """
 
 from __future__ import annotations
@@ -60,7 +67,6 @@ REQUEST_RETRIES = 3
 # 4H CONDITIONS
 # ============================================================
 
-# Keep v2.6 values
 MAX_4H_EVENT_BARS = 8
 MAX_SWEEP_TO_CISD_BARS = 8
 MAX_4H_RECENCY_BARS = 8
@@ -74,19 +80,47 @@ MIN_CISD_BODY_RATIO = 0.30
 # 15M STRUCTURE
 # ============================================================
 
-# Keep v2.6 swing definition
 SWING_LEFT = 2
 SWING_RIGHT = 2
 
-# Minimum distance between swing and current signal candle
 MIN_STRUCTURE_DISTANCE = 3
 
-# Minimum body ratio of the CURRENT signal candle
 MIN_STRUCTURE_BODY_RATIO = 0.25
 
 
 # ============================================================
-# SIGNAL DE-DUPLICATION
+# BOX / FAKE BREAKOUT FILTER
+# ============================================================
+
+# Number of CLOSED 15M candles used to detect
+# a recent trading range / box.
+BOX_LOOKBACK = 32
+
+# Minimum ATR distance that the CURRENT candle
+# must close outside the recent box.
+MIN_BOX_BREAK_ATR = 0.10
+
+# If the recent range is too compressed relative
+# to ATR, it is treated as a potential box.
+MAX_BOX_RANGE_ATR = 5.5
+
+# ATR period.
+ATR_PERIOD = 14
+
+
+# ============================================================
+# SIGNAL QUALITY SCORE
+# ============================================================
+
+MIN_SIGNAL_SCORE = 65
+MAX_TELEGRAM_SIGNALS = 10
+
+# RVOL period.
+RVOL_PERIOD = 20
+
+
+# ============================================================
+# STATE
 # ============================================================
 
 STATE_FILE = "signal_state.json"
@@ -118,30 +152,46 @@ class Candle:
 # HTTP
 # ============================================================
 
-def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def get_json(
+    path: str,
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+
     query = urlencode(params)
     url = f"{BASE_URL}{path}?{query}"
 
     last_err = None
 
     for attempt in range(REQUEST_RETRIES):
+
         try:
+
             req = Request(
                 url,
                 headers={
-                    "User-Agent": "bitget-4h15m-signal-scanner/1.0",
-                    "Accept": "application/json",
+                    "User-Agent":
+                        "bitget-4h15m-ranked-scanner/1.0",
+                    "Accept":
+                        "application/json",
                 },
                 method="GET",
             )
 
-            with urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            with urlopen(
+                req,
+                timeout=REQUEST_TIMEOUT,
+            ) as resp:
+
+                data = json.loads(
+                    resp.read().decode("utf-8")
+                )
 
             if data.get("code") != "00000":
+
                 raise RuntimeError(
-                    f"Bitget API error: "
-                    f"{data.get('code')} {data.get('msg')}"
+                    "Bitget API error: "
+                    f"{data.get('code')} "
+                    f"{data.get('msg')}"
                 )
 
             return data
@@ -153,11 +203,16 @@ def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
             json.JSONDecodeError,
             RuntimeError,
         ) as exc:
+
             last_err = exc
-            time.sleep(0.7 * (attempt + 1))
+
+            time.sleep(
+                0.7 * (attempt + 1)
+            )
 
     raise RuntimeError(
-        f"Request failed: {path} {params} :: {last_err}"
+        f"Request failed: "
+        f"{path} {params} :: {last_err}"
     )
 
 
@@ -166,15 +221,22 @@ def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================
 
 def get_symbols() -> List[str]:
+
     data = get_json(
         "/api/v3/market/instruments",
-        {"category": PRODUCT_TYPE},
+        {
+            "category": PRODUCT_TYPE
+        },
     )
 
     symbols = []
 
     for item in data.get("data", []):
-        symbol = str(item.get("symbol", "")).strip()
+
+        symbol = str(
+            item.get("symbol", "")
+        ).strip()
+
         quote_coin = str(
             item.get("quoteCoin", "")
         ).upper().strip()
@@ -231,6 +293,7 @@ def get_candles(
     candles = []
 
     for row in data.get("data", []):
+
         if len(row) < 6:
             continue
 
@@ -245,20 +308,23 @@ def get_candles(
             )
         )
 
-    candles.sort(key=lambda x: x.ts)
+    candles.sort(
+        key=lambda x: x.ts
+    )
 
     # --------------------------------------------------------
-    # IMPORTANT
-    # --------------------------------------------------------
-    # Remove currently forming candle.
-    # Only CLOSED candles remain.
+    # REMOVE CURRENTLY FORMING CANDLE
     # --------------------------------------------------------
 
-    now_ms = int(time.time() * 1000)
+    now_ms = int(
+        time.time() * 1000
+    )
 
     interval_ms = {
-        "4H": 4 * 60 * 60 * 1000,
-        "15m": 15 * 60 * 1000,
+        "4H":
+            4 * 60 * 60 * 1000,
+        "15m":
+            15 * 60 * 1000,
     }[granularity]
 
     return [
@@ -269,21 +335,93 @@ def get_candles(
 
 
 # ============================================================
-# HELPERS
+# BASIC HELPERS
 # ============================================================
 
-def bullish(candle: Candle) -> bool:
+def bullish(
+    candle: Candle,
+) -> bool:
+
     return candle.c > candle.o
 
 
-def bearish(candle: Candle) -> bool:
+def bearish(
+    candle: Candle,
+) -> bool:
+
     return candle.c < candle.o
 
 
-def body_ratio(candle: Candle) -> float:
-    candle_range = max(candle.h - candle.l, 1e-12)
+def body_ratio(
+    candle: Candle,
+) -> float:
 
-    return abs(candle.c - candle.o) / candle_range
+    candle_range = max(
+        candle.h - candle.l,
+        1e-12,
+    )
+
+    return abs(
+        candle.c - candle.o
+    ) / candle_range
+
+
+def true_range(
+    candles: List[Candle],
+    index: int,
+) -> float:
+
+    if index <= 0:
+
+        return (
+            candles[index].h
+            - candles[index].l
+        )
+
+    current = candles[index]
+    previous = candles[index - 1]
+
+    return max(
+        current.h - current.l,
+        abs(
+            current.h - previous.c
+        ),
+        abs(
+            current.l - previous.c
+        ),
+    )
+
+
+def atr(
+    candles: List[Candle],
+    period: int = ATR_PERIOD,
+) -> Optional[float]:
+
+    if len(candles) < period + 1:
+        return None
+
+    end = len(candles) - 1
+
+    start = max(
+        1,
+        end - period + 1,
+    )
+
+    values = [
+        true_range(
+            candles,
+            i,
+        )
+        for i in range(
+            start,
+            end + 1,
+        )
+    ]
+
+    if not values:
+        return None
+
+    return sum(values) / len(values)
 
 
 # ============================================================
@@ -295,7 +433,9 @@ def find_latest_sweep(
     direction: str,
 ) -> Optional[Dict[str, Any]]:
 
-    if len(candles) < LIQUIDITY_LOOKBACK + 2:
+    if len(candles) < (
+        LIQUIDITY_LOOKBACK + 2
+    ):
         return None
 
     end = len(candles) - 1
@@ -305,7 +445,11 @@ def find_latest_sweep(
         end - MAX_4H_EVENT_BARS + 1,
     )
 
-    for i in range(end, start - 1, -1):
+    for i in range(
+        end,
+        start - 1,
+        -1,
+    ):
 
         current = candles[i]
 
@@ -313,22 +457,18 @@ def find_latest_sweep(
             i - LIQUIDITY_LOOKBACK:i
         ]
 
-        # ----------------------------------------------------
-        # LONG
-        # ----------------------------------------------------
-
         if direction == "LONG":
 
             prior_low = min(
-                candle.l for candle in previous
+                candle.l
+                for candle in previous
             )
 
-            # Sweep below liquidity
-            # Then close back above it
             if (
                 current.l < prior_low
                 and current.c > prior_low
             ):
+
                 return {
                     "index": i,
                     "ts": current.ts,
@@ -336,22 +476,18 @@ def find_latest_sweep(
                     "open": current.o,
                 }
 
-        # ----------------------------------------------------
-        # SHORT
-        # ----------------------------------------------------
-
         else:
 
             prior_high = max(
-                candle.h for candle in previous
+                candle.h
+                for candle in previous
             )
 
-            # Sweep above liquidity
-            # Then close back below it
             if (
                 current.h > prior_high
                 and current.c < prior_high
             ):
+
                 return {
                     "index": i,
                     "ts": current.ts,
@@ -384,14 +520,13 @@ def find_cisd_after_sweep(
     if start > end:
         return None
 
-    for i in range(start, end + 1):
+    for i in range(
+        start,
+        end + 1,
+    ):
 
         current = candles[i]
         reference = candles[i - 1]
-
-        # ----------------------------------------------------
-        # LONG CISD
-        # ----------------------------------------------------
 
         if direction == "LONG":
 
@@ -401,7 +536,10 @@ def find_cisd_after_sweep(
             if current.c <= reference.h:
                 continue
 
-            if body_ratio(current) < MIN_CISD_BODY_RATIO:
+            if (
+                body_ratio(current)
+                < MIN_CISD_BODY_RATIO
+            ):
                 continue
 
             return {
@@ -410,11 +548,9 @@ def find_cisd_after_sweep(
                 "level": reference.h,
                 "open": current.o,
                 "close": current.c,
+                "body_ratio":
+                    body_ratio(current),
             }
-
-        # ----------------------------------------------------
-        # SHORT CISD
-        # ----------------------------------------------------
 
         else:
 
@@ -424,7 +560,10 @@ def find_cisd_after_sweep(
             if current.c >= reference.l:
                 continue
 
-            if body_ratio(current) < MIN_CISD_BODY_RATIO:
+            if (
+                body_ratio(current)
+                < MIN_CISD_BODY_RATIO
+            ):
                 continue
 
             return {
@@ -433,6 +572,8 @@ def find_cisd_after_sweep(
                 "level": reference.l,
                 "open": current.o,
                 "close": current.c,
+                "body_ratio":
+                    body_ratio(current),
             }
 
     return None
@@ -449,7 +590,8 @@ def is_swing_high(
 
     if (
         idx < SWING_LEFT
-        or idx + SWING_RIGHT >= len(candles)
+        or idx + SWING_RIGHT
+        >= len(candles)
     ):
         return False
 
@@ -484,7 +626,8 @@ def is_swing_low(
 
     if (
         idx < SWING_LEFT
-        or idx + SWING_RIGHT >= len(candles)
+        or idx + SWING_RIGHT
+        >= len(candles)
     ):
         return False
 
@@ -513,7 +656,7 @@ def is_swing_low(
 
 
 # ============================================================
-# 15M CURRENT CLOSED CANDLE STRUCTURE BREAK
+# CURRENT CLOSED CANDLE STRUCTURE BREAK
 # ============================================================
 
 def check_current_structure_break(
@@ -522,30 +665,21 @@ def check_current_structure_break(
     start_index: int,
 ) -> Optional[Dict[str, Any]]:
 
-    # --------------------------------------------------------
-    # We ONLY evaluate the latest CLOSED 15M candle.
-    # --------------------------------------------------------
-
-    if len(candles) < SWING_LEFT + SWING_RIGHT + 5:
+    if len(candles) < (
+        SWING_LEFT
+        + SWING_RIGHT
+        + 5
+    ):
         return None
 
     current_index = len(candles) - 1
 
-    current = candles[current_index]
-
-    # --------------------------------------------------------
-    # Current signal candle must be AFTER the 4H CISD.
-    # --------------------------------------------------------
+    current = candles[
+        current_index
+    ]
 
     if current_index <= start_index:
         return None
-
-    # --------------------------------------------------------
-    # Minimum distance:
-    # current candle must be at least
-    # MIN_STRUCTURE_DISTANCE candles away
-    # from the swing.
-    # --------------------------------------------------------
 
     latest_possible_swing = (
         current_index
@@ -555,27 +689,23 @@ def check_current_structure_break(
 
     latest_possible_swing = min(
         latest_possible_swing,
-        current_index - MIN_STRUCTURE_DISTANCE,
+        current_index
+        - MIN_STRUCTURE_DISTANCE,
     )
 
     if latest_possible_swing < start_index:
         return None
-
-    # --------------------------------------------------------
-    # Current signal candle itself
-    # --------------------------------------------------------
 
     if direction == "LONG":
 
         if not bullish(current):
             return None
 
-        if body_ratio(current) < MIN_STRUCTURE_BODY_RATIO:
+        if (
+            body_ratio(current)
+            < MIN_STRUCTURE_BODY_RATIO
+        ):
             return None
-
-        # ----------------------------------------------------
-        # Find the MOST RECENT confirmed swing high.
-        # ----------------------------------------------------
 
         for swing_index in range(
             latest_possible_swing,
@@ -589,10 +719,10 @@ def check_current_structure_break(
             ):
                 continue
 
-            level = candles[swing_index].h
+            level = candles[
+                swing_index
+            ].h
 
-            # Current CLOSED candle must close above
-            # the swing high.
             if current.c <= level:
                 continue
 
@@ -600,24 +730,22 @@ def check_current_structure_break(
                 "index": current_index,
                 "ts": current.ts,
                 "level": level,
-                "swing_ts": candles[swing_index].ts,
+                "swing_ts":
+                    candles[
+                        swing_index
+                    ].ts,
             }
-
-    # --------------------------------------------------------
-    # SHORT
-    # --------------------------------------------------------
 
     else:
 
         if not bearish(current):
             return None
 
-        if body_ratio(current) < MIN_STRUCTURE_BODY_RATIO:
+        if (
+            body_ratio(current)
+            < MIN_STRUCTURE_BODY_RATIO
+        ):
             return None
-
-        # ----------------------------------------------------
-        # Find the MOST RECENT confirmed swing low.
-        # ----------------------------------------------------
 
         for swing_index in range(
             latest_possible_swing,
@@ -631,10 +759,10 @@ def check_current_structure_break(
             ):
                 continue
 
-            level = candles[swing_index].l
+            level = candles[
+                swing_index
+            ].l
 
-            # Current CLOSED candle must close below
-            # the swing low.
             if current.c >= level:
                 continue
 
@@ -642,10 +770,407 @@ def check_current_structure_break(
                 "index": current_index,
                 "ts": current.ts,
                 "level": level,
-                "swing_ts": candles[swing_index].ts,
+                "swing_ts":
+                    candles[
+                        swing_index
+                    ].ts,
             }
 
     return None
+
+
+# ============================================================
+# BOX FILTER
+# ============================================================
+
+def check_box_breakout(
+    candles: List[Candle],
+    direction: str,
+) -> Optional[Dict[str, Any]]:
+
+    current_index = len(candles) - 1
+
+    if current_index < BOX_LOOKBACK + 5:
+        return None
+
+    current = candles[
+        current_index
+    ]
+
+    previous_start = (
+        current_index
+        - BOX_LOOKBACK
+    )
+
+    previous = candles[
+        previous_start:current_index
+    ]
+
+    if len(previous) < BOX_LOOKBACK:
+        return None
+
+    current_atr = atr(
+        candles,
+        ATR_PERIOD,
+    )
+
+    if current_atr is None:
+        return None
+
+    box_high = max(
+        candle.h
+        for candle in previous
+    )
+
+    box_low = min(
+        candle.l
+        for candle in previous
+    )
+
+    box_range = (
+        box_high - box_low
+    )
+
+    if box_range <= 0:
+        return None
+
+    range_atr = (
+        box_range / current_atr
+    )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # If the market has been extremely compressed,
+    # do not automatically accept a tiny wick break.
+    #
+    # We require the CURRENT CLOSED candle to close
+    # meaningfully outside the recent range.
+    # --------------------------------------------------------
+
+    if direction == "LONG":
+
+        break_distance = (
+            current.c - box_high
+        )
+
+        if break_distance <= 0:
+            return None
+
+        if (
+            break_distance
+            < current_atr
+            * MIN_BOX_BREAK_ATR
+        ):
+            return None
+
+        return {
+            "box_high": box_high,
+            "box_low": box_low,
+            "box_range": box_range,
+            "range_atr": range_atr,
+            "break_distance":
+                break_distance,
+            "atr": current_atr,
+        }
+
+    else:
+
+        break_distance = (
+            box_low - current.c
+        )
+
+        if break_distance <= 0:
+            return None
+
+        if (
+            break_distance
+            < current_atr
+            * MIN_BOX_BREAK_ATR
+        ):
+            return None
+
+        return {
+            "box_high": box_high,
+            "box_low": box_low,
+            "box_range": box_range,
+            "range_atr": range_atr,
+            "break_distance":
+                break_distance,
+            "atr": current_atr,
+        }
+
+
+# ============================================================
+# RVOL
+# ============================================================
+
+def relative_volume(
+    candles: List[Candle],
+) -> Optional[float]:
+
+    current_index = len(candles) - 1
+
+    if current_index < RVOL_PERIOD + 1:
+        return None
+
+    current_volume = candles[
+        current_index
+    ].v
+
+    start = (
+        current_index
+        - RVOL_PERIOD
+    )
+
+    previous_volumes = [
+        candles[i].v
+        for i in range(
+            start,
+            current_index,
+        )
+    ]
+
+    if not previous_volumes:
+        return None
+
+    average_volume = (
+        sum(previous_volumes)
+        / len(previous_volumes)
+    )
+
+    if average_volume <= 0:
+        return None
+
+    return (
+        current_volume
+        / average_volume
+    )
+
+
+# ============================================================
+# SCORE HELPERS
+# ============================================================
+
+def score_breakout_distance(
+    break_distance: float,
+    current_atr: float,
+) -> float:
+
+    if current_atr <= 0:
+        return 0.0
+
+    ratio = (
+        break_distance
+        / current_atr
+    )
+
+    if ratio >= 0.75:
+        return 20.0
+
+    if ratio >= 0.50:
+        return 16.0
+
+    if ratio >= 0.30:
+        return 12.0
+
+    if ratio >= 0.15:
+        return 8.0
+
+    return 4.0
+
+
+def score_candle_quality(
+    candle: Candle,
+) -> float:
+
+    ratio = body_ratio(candle)
+
+    if candle.h <= candle.l:
+        return 0.0
+
+    if candle.c >= candle.o:
+
+        close_position = (
+            candle.c - candle.l
+        ) / (
+            candle.h - candle.l
+        )
+
+    else:
+
+        close_position = (
+            candle.h - candle.c
+        ) / (
+            candle.h - candle.l
+        )
+
+    score = 0.0
+
+    # Body quality: maximum 10
+    if ratio >= 0.70:
+        score += 10
+    elif ratio >= 0.55:
+        score += 8
+    elif ratio >= 0.40:
+        score += 6
+    elif ratio >= 0.30:
+        score += 4
+    else:
+        score += 2
+
+    # Close quality: maximum 5
+    if close_position >= 0.80:
+        score += 5
+    elif close_position >= 0.65:
+        score += 4
+    elif close_position >= 0.50:
+        score += 2
+
+    return min(
+        score,
+        15.0,
+    )
+
+
+def score_rvol(
+    rvol: Optional[float],
+) -> float:
+
+    if rvol is None:
+        return 0.0
+
+    if rvol >= 2.0:
+        return 10.0
+
+    if rvol >= 1.5:
+        return 8.0
+
+    if rvol >= 1.2:
+        return 6.0
+
+    if rvol >= 1.0:
+        return 4.0
+
+    if rvol >= 0.8:
+        return 2.0
+
+    return 0.0
+
+
+def score_4h_quality(
+    cisd: Dict[str, Any],
+    recency: int,
+) -> float:
+
+    score = 0.0
+
+    cisd_body = cisd.get(
+        "body_ratio",
+        0.0,
+    )
+
+    # CISD strength: maximum 10
+    if cisd_body >= 0.70:
+        score += 10
+    elif cisd_body >= 0.55:
+        score += 8
+    elif cisd_body >= 0.40:
+        score += 6
+    elif cisd_body >= 0.30:
+        score += 4
+
+    # Recency: maximum 5
+    if recency <= 2:
+        score += 5
+    elif recency <= 4:
+        score += 4
+    elif recency <= 6:
+        score += 2
+
+    return min(
+        score,
+        15.0,
+    )
+
+
+# ============================================================
+# SIGNAL QUALITY SCORE
+# ============================================================
+
+def calculate_signal_score(
+    c15: List[Candle],
+    cisd: Dict[str, Any],
+    recency: int,
+    box: Dict[str, Any],
+) -> Dict[str, Any]:
+
+    current = c15[
+        -1
+    ]
+
+    breakout_score = score_breakout_distance(
+        box["break_distance"],
+        box["atr"],
+    )
+
+    candle_score = score_candle_quality(
+        current
+    )
+
+    rvol = relative_volume(
+        c15
+    )
+
+    rvol_score = score_rvol(
+        rvol
+    )
+
+    structure_score = 15.0
+
+    four_hour_score = score_4h_quality(
+        cisd,
+        recency,
+    )
+
+    total = (
+        breakout_score
+        + candle_score
+        + rvol_score
+        + structure_score
+        + four_hour_score
+    )
+
+    return {
+        "score":
+            round(total, 1),
+
+        "breakout_score":
+            round(breakout_score, 1),
+
+        "candle_score":
+            round(candle_score, 1),
+
+        "rvol_score":
+            round(rvol_score, 1),
+
+        "structure_score":
+            round(structure_score, 1),
+
+        "four_hour_score":
+            round(four_hour_score, 1),
+
+        "rvol":
+            round(rvol, 2)
+            if rvol is not None
+            else None,
+
+        "atr":
+            box["atr"],
+
+        "break_distance":
+            box["break_distance"],
+    }
 
 
 # ============================================================
@@ -656,13 +1181,16 @@ def analyze_symbol(
     symbol: str,
 ) -> List[Dict[str, Any]]:
 
-    signals: List[Dict[str, Any]] = []
+    signals: List[
+        Dict[str, Any]
+    ] = []
 
     # --------------------------------------------------------
-    # 4H DATA
+    # 4H
     # --------------------------------------------------------
 
     try:
+
         c4 = get_candles(
             symbol,
             "4H",
@@ -670,6 +1198,7 @@ def analyze_symbol(
         )
 
     except Exception:
+
         return signals
 
     if len(c4) < 40:
@@ -679,11 +1208,10 @@ def analyze_symbol(
     # LONG + SHORT
     # --------------------------------------------------------
 
-    for direction in ("LONG", "SHORT"):
-
-        # ----------------------------------------------------
-        # 4H SWEEP
-        # ----------------------------------------------------
+    for direction in (
+        "LONG",
+        "SHORT",
+    ):
 
         sweep = find_latest_sweep(
             c4,
@@ -692,10 +1220,6 @@ def analyze_symbol(
 
         if not sweep:
             continue
-
-        # ----------------------------------------------------
-        # 4H CISD
-        # ----------------------------------------------------
 
         cisd = find_cisd_after_sweep(
             c4,
@@ -706,24 +1230,24 @@ def analyze_symbol(
         if not cisd:
             continue
 
-        # ----------------------------------------------------
-        # 4H RECENCY
-        # ----------------------------------------------------
-
         recency = (
             len(c4)
             - 1
             - cisd["index"]
         )
 
-        if recency > MAX_4H_RECENCY_BARS:
+        if (
+            recency
+            > MAX_4H_RECENCY_BARS
+        ):
             continue
 
         # ----------------------------------------------------
-        # 15M DATA
+        # 15M
         # ----------------------------------------------------
 
         try:
+
             c15 = get_candles(
                 symbol,
                 "15m",
@@ -731,19 +1255,21 @@ def analyze_symbol(
             )
 
         except Exception:
+
             continue
 
         if len(c15) < 100:
             continue
 
         # ----------------------------------------------------
-        # Find first 15M candle AFTER 4H CISD.
+        # First 15M candle AFTER 4H CISD
         # ----------------------------------------------------
 
         start15 = next(
             (
                 i
-                for i, candle in enumerate(c15)
+                for i, candle
+                in enumerate(c15)
                 if candle.ts > cisd["ts"]
             ),
             len(c15),
@@ -753,33 +1279,39 @@ def analyze_symbol(
             continue
 
         # ----------------------------------------------------
-        # IMPORTANT
-        #
-        # DO NOT search the previous 96 candles.
-        #
-        # Only the CURRENT CLOSED 15M candle is evaluated.
+        # CURRENT CLOSED CANDLE STRUCTURE BREAK
         # ----------------------------------------------------
 
-        structure = check_current_structure_break(
-            c15,
-            direction,
-            start15,
+        structure = (
+            check_current_structure_break(
+                c15,
+                direction,
+                start15,
+            )
         )
 
         if not structure:
             continue
 
         # ----------------------------------------------------
-        # Current signal candle
+        # BOX / FAKE BREAKOUT FILTER
+        # ----------------------------------------------------
+
+        box = check_box_breakout(
+            c15,
+            direction,
+        )
+
+        if not box:
+            continue
+
+        # ----------------------------------------------------
+        # CURRENT SIGNAL CANDLE
         # ----------------------------------------------------
 
         signal_candle = c15[
-            structure["index"]
+            -1
         ]
-
-        # ----------------------------------------------------
-        # Defensive CLOSED candle check
-        # ----------------------------------------------------
 
         interval_ms = (
             15
@@ -799,24 +1331,103 @@ def analyze_symbol(
             continue
 
         # ----------------------------------------------------
-        # Confirmed signal
+        # QUALITY SCORE
+        # ----------------------------------------------------
+
+        score = calculate_signal_score(
+            c15,
+            cisd,
+            recency,
+            box,
+        )
+
+        if (
+            score["score"]
+            < MIN_SIGNAL_SCORE
+        ):
+            continue
+
+        # ----------------------------------------------------
+        # CONFIRMED SIGNAL
         # ----------------------------------------------------
 
         signals.append(
             {
-                "symbol": symbol,
-                "direction": direction,
+                "symbol":
+                    symbol,
 
-                "cisd_open": cisd["open"],
+                "direction":
+                    direction,
 
-                "signal_open": signal_candle.o,
-                "signal_close": signal_candle.c,
+                "cisd_open":
+                    cisd["open"],
 
-                "signal_ts": signal_candle.ts,
+                "cisd_close":
+                    cisd["close"],
 
-                "structure_level": structure["level"],
+                "cisd_body_ratio":
+                    cisd["body_ratio"],
 
-                "swing_ts": structure["swing_ts"],
+                "signal_open":
+                    signal_candle.o,
+
+                "signal_close":
+                    signal_candle.c,
+
+                "signal_ts":
+                    signal_candle.ts,
+
+                "structure_level":
+                    structure["level"],
+
+                "swing_ts":
+                    structure["swing_ts"],
+
+                "box_high":
+                    box["box_high"],
+
+                "box_low":
+                    box["box_low"],
+
+                "box_range":
+                    box["box_range"],
+
+                "break_distance":
+                    box["break_distance"],
+
+                "atr":
+                    box["atr"],
+
+                "score":
+                    score["score"],
+
+                "breakout_score":
+                    score[
+                        "breakout_score"
+                    ],
+
+                "candle_score":
+                    score[
+                        "candle_score"
+                    ],
+
+                "rvol_score":
+                    score[
+                        "rvol_score"
+                    ],
+
+                "structure_score":
+                    score[
+                        "structure_score"
+                    ],
+
+                "four_hour_score":
+                    score[
+                        "four_hour_score"
+                    ],
+
+                "rvol":
+                    score["rvol"],
             }
         )
 
@@ -827,7 +1438,9 @@ def analyze_symbol(
 # TELEGRAM
 # ============================================================
 
-def fmt_price(value: float) -> str:
+def fmt_price(
+    value: float,
+) -> str:
 
     if value >= 1000:
         return f"{value:,.2f}"
@@ -838,7 +1451,9 @@ def fmt_price(value: float) -> str:
     return f"{value:.8f}"
 
 
-def kst_time(ts: int) -> str:
+def kst_time(
+    ts: int,
+) -> str:
 
     dt = datetime.fromtimestamp(
         ts / 1000,
@@ -846,7 +1461,9 @@ def kst_time(ts: int) -> str:
     )
 
     dt = dt.astimezone(
-        timezone(timedelta(hours=9))
+        timezone(
+            timedelta(hours=9)
+        )
     )
 
     return dt.strftime(
@@ -860,19 +1477,51 @@ def make_message(
 
     icon = (
         "🟢"
-        if signal["direction"] == "LONG"
+        if signal["direction"]
+        == "LONG"
         else "🔴"
     )
 
+    rvol_text = (
+        f"{signal['rvol']:.2f}x"
+        if signal["rvol"]
+        is not None
+        else "N/A"
+    )
+
     return (
-        f"{icon} {signal['direction']} SIGNAL\n\n"
+        f"{icon} "
+        f"{signal['direction']} SIGNAL\n\n"
+
         f"{signal['symbol']}\n\n"
-        f"15M\n"
-        f"CISD Break ✅\n\n"
+
+        f"⭐ SCORE "
+        f"{signal['score']:.1f}/100\n\n"
+
+        f"4H Sweep → CISD → Recency ✅\n"
+        f"15M Structure Break ✅\n"
+        f"15M Closed Candle ✅\n"
+        f"Box Breakout ✅\n\n"
+
         f"CISD 시가: "
         f"{fmt_price(signal['cisd_open'])}\n"
-        f"봉마감 종가: "
+
+        f"신호봉 종가: "
         f"{fmt_price(signal['signal_close'])}\n\n"
+
+        f"돌파강도: "
+        f"{signal['breakout_score']:.1f}/20\n"
+
+        f"캔들품질: "
+        f"{signal['candle_score']:.1f}/15\n"
+
+        f"RVOL: "
+        f"{rvol_text} "
+        f"({signal['rvol_score']:.1f}/10)\n"
+
+        f"4H 품질: "
+        f"{signal['four_hour_score']:.1f}/15\n\n"
+
         f"신호봉 마감\n"
         f"{kst_time(signal['signal_ts'])}"
     )
@@ -893,21 +1542,29 @@ def send_telegram(
     ).strip()
 
     if not token or not chat_id:
+
         print(
-            "[INFO] New Telegram secrets are not set."
+            "[INFO] "
+            "Telegram secrets are not set."
         )
+
         return
 
     url = (
-        f"https://api.telegram.org/"
+        "https://api.telegram.org/"
         f"bot{token}/sendMessage"
     )
 
     payload = urlencode(
         {
-            "chat_id": chat_id,
-            "text": message,
-            "disable_web_page_preview": "true",
+            "chat_id":
+                chat_id,
+
+            "text":
+                message,
+
+            "disable_web_page_preview":
+                "true",
         }
     ).encode()
 
@@ -916,7 +1573,7 @@ def send_telegram(
         data=payload,
         headers={
             "Content-Type":
-            "application/x-www-form-urlencoded"
+                "application/x-www-form-urlencoded"
         },
         method="POST",
     )
@@ -925,11 +1582,12 @@ def send_telegram(
         req,
         timeout=REQUEST_TIMEOUT,
     ) as resp:
+
         resp.read()
 
 
 # ============================================================
-# STATE / DUPLICATION
+# STATE
 # ============================================================
 
 def load_state() -> Dict[str, Any]:
@@ -937,6 +1595,7 @@ def load_state() -> Dict[str, Any]:
     if not os.path.exists(
         STATE_FILE
     ):
+
         return {
             "signals": []
         }
@@ -958,9 +1617,11 @@ def load_state() -> Dict[str, Any]:
                 list,
             )
         ):
+
             return data
 
     except Exception:
+
         pass
 
     return {
@@ -972,9 +1633,11 @@ def save_state(
     state: Dict[str, Any],
 ) -> None:
 
-    # Keep state small.
     state["signals"] = (
-        state.get("signals", [])[-500:]
+        state.get(
+            "signals",
+            []
+        )[-500:]
     )
 
     with open(
@@ -1013,7 +1676,7 @@ def main() -> None:
     )
 
     print(
-        " Bitget 4H -> 15M Signal Scanner"
+        " Bitget 4H -> 15M Ranked Signal Scanner"
     )
 
     print(
@@ -1025,7 +1688,19 @@ def main() -> None:
     )
 
     print(
-        "15M CURRENT CLOSED CANDLE STRUCTURE BREAK"
+        "15M CURRENT CLOSED STRUCTURE BREAK"
+    )
+
+    print(
+        "BOX FILTER + QUALITY SCORE"
+    )
+
+    print(
+        f"MIN SCORE: {MIN_SIGNAL_SCORE}"
+    )
+
+    print(
+        f"MAX SIGNALS: {MAX_TELEGRAM_SIGNALS}"
     )
 
     print(
@@ -1047,13 +1722,14 @@ def main() -> None:
     except Exception as exc:
 
         print(
-            f"[FATAL] symbol loading failed: {exc}"
+            "[FATAL] "
+            f"symbol loading failed: {exc}"
         )
 
         return
 
     print(
-        f"[INFO] selected symbols: "
+        "[INFO] selected symbols: "
         f"{len(symbols)}"
     )
 
@@ -1096,7 +1772,7 @@ def main() -> None:
             except Exception as exc:
 
                 print(
-                    f"[ERROR] "
+                    "[ERROR] "
                     f"{futures[future]}: "
                     f"{exc}"
                 )
@@ -1104,12 +1780,12 @@ def main() -> None:
             if done % 50 == 0:
 
                 print(
-                    f"[INFO] progress "
+                    "[INFO] progress "
                     f"{done}/{len(symbols)}"
                 )
 
     # --------------------------------------------------------
-    # DE-DUPLICATE SAME RUN
+    # SAME-RUN DE-DUPLICATION
     # --------------------------------------------------------
 
     unique = {}
@@ -1124,12 +1800,37 @@ def main() -> None:
         unique.values()
     )
 
+    # --------------------------------------------------------
+    # SORT BY QUALITY
+    # --------------------------------------------------------
+
     all_signals.sort(
         key=lambda x: (
+            x["score"],
             x["signal_ts"],
-            x["symbol"],
-            x["direction"],
-        )
+        ),
+        reverse=True,
+    )
+
+    print(
+        "[INFO] signals after "
+        "box + score filter: "
+        f"{len(all_signals)}"
+    )
+
+    # --------------------------------------------------------
+    # TOP 10 ONLY
+    # --------------------------------------------------------
+
+    ranked_signals = (
+        all_signals[
+            :MAX_TELEGRAM_SIGNALS
+        ]
+    )
+
+    print(
+        "[INFO] ranked TOP signals: "
+        f"{len(ranked_signals)}"
     )
 
     # --------------------------------------------------------
@@ -1146,23 +1847,18 @@ def main() -> None:
     )
 
     # --------------------------------------------------------
-    # ONLY NEW SIGNALS
+    # ONLY NEW TOP SIGNALS
     # --------------------------------------------------------
 
     new_signals = [
         signal
-        for signal in all_signals
+        for signal in ranked_signals
         if signal_key(signal)
         not in sent_keys
     ]
 
     print(
-        f"[INFO] confirmed signals: "
-        f"{len(all_signals)}"
-    )
-
-    print(
-        f"[INFO] new signals: "
+        "[INFO] new Telegram signals: "
         f"{len(new_signals)}"
     )
 
@@ -1170,14 +1866,21 @@ def main() -> None:
     # TELEGRAM
     # --------------------------------------------------------
 
-    for signal in new_signals:
+    for rank, signal in enumerate(
+        new_signals,
+        start=1,
+    ):
+
+        print(
+            f"\n========== TOP {rank} =========="
+        )
 
         message = make_message(
             signal
         )
 
         print(
-            "\n" + message + "\n"
+            message
         )
 
         try:
@@ -1205,8 +1908,8 @@ def main() -> None:
         except Exception as exc:
 
             print(
-                "[WARN] Telegram failed: "
-                f"{exc}"
+                "[WARN] "
+                f"Telegram failed: {exc}"
             )
 
     # --------------------------------------------------------
