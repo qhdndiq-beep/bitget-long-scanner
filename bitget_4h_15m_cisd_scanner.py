@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Structure Scanner v2.3
+Bitget 4H -> 15M Structure Scanner v2.4
 
 FLOW
 ----
@@ -15,20 +15,28 @@ FLOW
         ↓
 15M STRUCTURE CANDIDATE
 
-v2.3 PURPOSE
+v2.4 PURPOSE
 -------------
-v2.2에서 발견된 15M API 400 오류 수정.
+v2.3에서 수정된 15M API 문제를 유지하면서
+4H CISD -> 15M Structure 연결 시간을 정밀 진단한다.
 
 IMPORTANT
 ---------
-15M Structure 조건은 v2.2와 동일하다.
+4H / 15M Structure 조건은 v2.3과 동일하다.
 조건 완화 없음.
 
-주요 수정:
-- Bitget history-candles limit 최대 200 대응
-- 15M DATA SUCCESS / ERROR 진단
-- 개별 종목 API 오류는 해당 종목만 SKIP
-- 4H EVENT가 없는 종목은 15M API 호출하지 않음
+추가 진단:
+- 4H CISD -> 15M Structure 경과시간
+- LONG / SHORT 구조 발생 시간 분포
+- Structure 탐색 가능 여부
+- Structure 검색 window 진단
+- Candidate에 경과시간 표시
+- JSON에 경과시간 저장
+
+15M Structure SEARCH WINDOW
+---------------------------
+MAX_15M_STRUCTURE_BARS = 96
+= 최대 24시간
 
 No trading orders are placed.
 """
@@ -107,6 +115,28 @@ MIN_STRUCTURE_BODY_RATIO = 0.25
 
 
 # ============================================================
+# STRUCTURE TIMING DIAGNOSTIC
+# ============================================================
+
+STRUCTURE_INTERVAL_MINUTES = 15
+
+STRUCTURE_WINDOW_HOURS = (
+    MAX_15M_STRUCTURE_BARS
+    * STRUCTURE_INTERVAL_MINUTES
+    / 60
+)
+
+STRUCTURE_TIME_BUCKETS = [
+    ("0-1H", 0, 60),
+    ("1-3H", 60, 180),
+    ("3-6H", 180, 360),
+    ("6-12H", 360, 720),
+    ("12-24H", 720, 1440),
+    ("24H+", 1440, None),
+]
+
+
+# ============================================================
 # DATA
 # ============================================================
 
@@ -138,6 +168,10 @@ class StructureCandidate:
 
     current_price: float
 
+    # v2.4 timing diagnostic
+    cisd_to_structure_minutes: float
+    cisd_to_structure_hours: float
+
 
 # ============================================================
 # HTTP
@@ -161,7 +195,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h15m-structure-scanner/2.3",
+                        "bitget-4h15m-structure-scanner/2.4",
                     "Accept":
                         "application/json",
                 },
@@ -366,6 +400,45 @@ def body_ratio(c: Candle) -> float:
         abs(c.c - c.o)
         / candle_range
     )
+
+
+def minutes_between(
+    start_ts: int,
+    end_ts: int
+) -> float:
+
+    return (
+        end_ts - start_ts
+    ) / 60000.0
+
+
+def hours_between(
+    start_ts: int,
+    end_ts: int
+) -> float:
+
+    return (
+        end_ts - start_ts
+    ) / 3600000.0
+
+
+def timing_bucket(
+    minutes: float
+) -> str:
+
+    for name, low, high in STRUCTURE_TIME_BUCKETS:
+
+        if high is None:
+
+            if minutes >= low:
+                return name
+
+        else:
+
+            if low <= minutes < high:
+                return name
+
+    return "UNKNOWN"
 
 
 # ============================================================
@@ -802,6 +875,9 @@ def analyze_symbol(
 
         "fifteen_min_status": "NOT_REQUESTED",
 
+        "long_structure_status": "NOT_CHECKED",
+        "short_structure_status": "NOT_CHECKED",
+
         "error_stage": None,
         "error": None,
     }
@@ -874,6 +950,7 @@ def analyze_symbol(
                     ] = {
                         "sweep": sweep_long,
                         "cisd": cisd_long,
+                        "recency_bars": recency,
                     }
 
     except Exception as exc:
@@ -922,6 +999,7 @@ def analyze_symbol(
                     ] = {
                         "sweep": sweep_short,
                         "cisd": cisd_short,
+                        "recency_bars": recency,
                     }
 
     except Exception as exc:
@@ -1011,9 +1089,15 @@ def analyze_symbol(
 
             if (
                 start15
-                <
+                >=
                 len(c15) - 10
             ):
+
+                result[
+                    "long_structure_status"
+                ] = "INSUFFICIENT_TIME_WINDOW"
+
+            else:
 
                 structure = (
                     find_structure_break(
@@ -1029,6 +1113,10 @@ def analyze_symbol(
                         "long_structure"
                     ] = True
 
+                    result[
+                        "long_structure_status"
+                    ] = "FOUND"
+
                     sweep = result[
                         "long_event_data"
                     ]["sweep"]
@@ -1036,6 +1124,20 @@ def analyze_symbol(
                     cisd = result[
                         "long_event_data"
                     ]["cisd"]
+
+                    elapsed_minutes = (
+                        minutes_between(
+                            cisd["ts"],
+                            structure["ts"]
+                        )
+                    )
+
+                    elapsed_hours = (
+                        hours_between(
+                            cisd["ts"],
+                            structure["ts"]
+                        )
+                    )
 
                     result[
                         "long_candidate"
@@ -1068,7 +1170,19 @@ def analyze_symbol(
 
                         current_price=
                             c15[-1].c,
+
+                        cisd_to_structure_minutes=
+                            elapsed_minutes,
+
+                        cisd_to_structure_hours=
+                            elapsed_hours,
                     )
+
+                else:
+
+                    result[
+                        "long_structure_status"
+                    ] = "NOT_FOUND"
 
         except Exception as exc:
 
@@ -1104,9 +1218,15 @@ def analyze_symbol(
 
             if (
                 start15
-                <
+                >=
                 len(c15) - 10
             ):
+
+                result[
+                    "short_structure_status"
+                ] = "INSUFFICIENT_TIME_WINDOW"
+
+            else:
 
                 structure = (
                     find_structure_break(
@@ -1122,6 +1242,10 @@ def analyze_symbol(
                         "short_structure"
                     ] = True
 
+                    result[
+                        "short_structure_status"
+                    ] = "FOUND"
+
                     sweep = result[
                         "short_event_data"
                     ]["sweep"]
@@ -1129,6 +1253,20 @@ def analyze_symbol(
                     cisd = result[
                         "short_event_data"
                     ]["cisd"]
+
+                    elapsed_minutes = (
+                        minutes_between(
+                            cisd["ts"],
+                            structure["ts"]
+                        )
+                    )
+
+                    elapsed_hours = (
+                        hours_between(
+                            cisd["ts"],
+                            structure["ts"]
+                        )
+                    )
 
                     result[
                         "short_candidate"
@@ -1161,7 +1299,19 @@ def analyze_symbol(
 
                         current_price=
                             c15[-1].c,
+
+                        cisd_to_structure_minutes=
+                            elapsed_minutes,
+
+                        cisd_to_structure_hours=
+                            elapsed_hours,
                     )
+
+                else:
+
+                    result[
+                        "short_structure_status"
+                    ] = "NOT_FOUND"
 
         except Exception as exc:
 
@@ -1205,6 +1355,23 @@ def short_ts(
     )
 
 
+def format_elapsed(
+    minutes: float
+) -> str:
+
+    if minutes < 60:
+
+        return (
+            f"{minutes:.0f}분"
+        )
+
+    hours = minutes / 60
+
+    return (
+        f"{hours:.1f}시간"
+    )
+
+
 def format_candidate(
     c: StructureCandidate
 ) -> str:
@@ -1213,6 +1380,10 @@ def format_candidate(
         "🟢"
         if c.direction == "LONG"
         else "🔴"
+    )
+
+    bucket = timing_bucket(
+        c.cisd_to_structure_minutes
     )
 
     return (
@@ -1233,6 +1404,10 @@ def format_candidate(
 
         f"15M Swing: "
         f"{short_ts(c.swing_ts)}\n"
+
+        f"CISD → Structure: "
+        f"{format_elapsed(c.cisd_to_structure_minutes)} "
+        f"[{bucket}]\n"
 
         f"현재가: "
         f"{fmt_price(c.current_price)}"
@@ -1295,6 +1470,78 @@ def send_telegram(
     ) as resp:
 
         resp.read()
+
+
+# ============================================================
+# TIMING DIAGNOSTIC
+# ============================================================
+
+def build_timing_distribution(
+    candidates: List[StructureCandidate],
+    direction: str
+) -> List[str]:
+
+    filtered = [
+        c
+        for c in candidates
+        if c.direction == direction
+    ]
+
+    counts = {
+        bucket: 0
+        for bucket, _, _ in STRUCTURE_TIME_BUCKETS
+    }
+
+    for candidate in filtered:
+
+        bucket = timing_bucket(
+            candidate.cisd_to_structure_minutes
+        )
+
+        if bucket in counts:
+            counts[bucket] += 1
+
+    lines = []
+
+    for bucket, _, _ in STRUCTURE_TIME_BUCKETS:
+
+        lines.append(
+            f"   └ {bucket:<6}: "
+            f"{counts[bucket]}"
+        )
+
+    if filtered:
+
+        values = [
+            c.cisd_to_structure_minutes
+            for c in filtered
+        ]
+
+        avg_minutes = (
+            sum(values)
+            /
+            len(values)
+        )
+
+        min_minutes = min(values)
+        max_minutes = max(values)
+
+        lines.append(
+            f"   └ 평균   : "
+            f"{format_elapsed(avg_minutes)}"
+        )
+
+        lines.append(
+            f"   └ 최소   : "
+            f"{format_elapsed(min_minutes)}"
+        )
+
+        lines.append(
+            f"   └ 최대   : "
+            f"{format_elapsed(max_minutes)}"
+        )
+
+    return lines
 
 
 # ============================================================
@@ -1363,9 +1610,41 @@ def build_report(
         == "ERROR"
     ]
 
+    # ========================================================
+    # STRUCTURE STATUS
+    # ========================================================
+
+    long_not_found = [
+        x
+        for x in diagnostics
+        if x.get("long_structure_status")
+        == "NOT_FOUND"
+    ]
+
+    short_not_found = [
+        x
+        for x in diagnostics
+        if x.get("short_structure_status")
+        == "NOT_FOUND"
+    ]
+
+    long_insufficient = [
+        x
+        for x in diagnostics
+        if x.get("long_structure_status")
+        == "INSUFFICIENT_TIME_WINDOW"
+    ]
+
+    short_insufficient = [
+        x
+        for x in diagnostics
+        if x.get("short_structure_status")
+        == "INSUFFICIENT_TIME_WINDOW"
+    ]
+
     lines = [
 
-        "🔎 4H→15M Structure Scanner v2.3",
+        "🔎 4H→15M Structure Scanner v2.4",
 
         now,
 
@@ -1377,7 +1656,7 @@ def build_report(
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
-        "🔬 v2.3 DIAGNOSTIC",
+        "🔬 v2.4 DIAGNOSTIC",
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
@@ -1411,6 +1690,48 @@ def build_report(
 
         "",
 
+        "④ STRUCTURE SEARCH DIAGNOSTIC",
+
+        f"   └ LONG NOT FOUND  : "
+        f"{len(long_not_found)}",
+
+        f"   └ SHORT NOT FOUND : "
+        f"{len(short_not_found)}",
+
+        f"   └ LONG WINDOW ERR : "
+        f"{len(long_insufficient)}",
+
+        f"   └ SHORT WINDOW ERR: "
+        f"{len(short_insufficient)}",
+
+        "",
+
+        "⑤ CISD → STRUCTURE TIMING",
+
+        f"   └ SEARCH WINDOW : "
+        f"{STRUCTURE_WINDOW_HOURS:.0f}H",
+
+        "",
+        "   LONG",
+    ]
+
+    lines += build_timing_distribution(
+        candidates,
+        "LONG"
+    )
+
+    lines += [
+        "",
+        "   SHORT",
+    ]
+
+    lines += build_timing_distribution(
+        candidates,
+        "SHORT"
+    )
+
+    lines += [
+        "",
         f"⚠️ API/분석 오류 : "
         f"{errors}",
 
@@ -1475,6 +1796,7 @@ def build_report(
         for candidate in sorted(
             candidates,
             key=lambda x: (
+                x.cisd_to_structure_minutes,
                 x.symbol,
                 x.direction
             )
@@ -1497,8 +1819,8 @@ def build_report(
             "🔥 유효 15M Structure 후보 없음",
             "",
             "다음 단계:",
-            "4H 이벤트 → 15M Structure "
-            "연결 검증",
+            "4H CISD → 15M Structure "
+            "연결 시간 분포 확인",
         ]
 
     return "\n".join(lines)
@@ -1515,7 +1837,7 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v2.3\n"
+        " Bitget 4H -> 15M Structure Scanner v2.4\n"
         "============================================\n"
     )
 
@@ -1528,6 +1850,11 @@ def main() -> None:
     print(
         "4H Sweep -> CISD -> Recency -> "
         "15M Swing Structure"
+    )
+
+    print(
+        "STRUCTURE WINDOW: "
+        f"{STRUCTURE_WINDOW_HOURS:.0f}H"
     )
 
     print(
@@ -1636,6 +1963,10 @@ def main() -> None:
                         None,
                     "fifteen_min_status":
                         "ERROR",
+                    "long_structure_status":
+                        "NOT_CHECKED",
+                    "short_structure_status":
+                        "NOT_CHECKED",
                 })
 
                 print(
