@@ -6,23 +6,37 @@ import pandas as pd
 BASE = "https://api.bitget.com"
 PRODUCT_TYPE = "USDT-FUTURES"
 
+# =========================================================
+# SCANNER SETTINGS
+# =========================================================
+
 # 24H 최소 거래대금
-# 기존 30,000,000 → 10,000,000 USDT로 하향
+# 기존 30,000,000 → 10,000,000 USDT
 MIN_24H_TURNOVER = 10_000_000
 
-# 평소 평균 거래량 대비 최소 1.30배
+# 현재 봉 거래량 / 직전 20개 완성봉 평균 거래량
 MIN_VOL_RATIO = 1.30
 
+# 현재가가 MA20에서 너무 멀어지는 것 방지
 MAX_MA20_DISTANCE = 0.06
+
+# Telegram / 결과 출력 개수
 TOP_N = 10
 
+
 session = requests.Session()
+
 session.headers.update({
     "User-Agent": "Bitget-1H-Long-Scanner-v2.2/1.0"
 })
 
 
+# =========================================================
+# BITGET API
+# =========================================================
+
 def get(path, params=None):
+
     r = session.get(
         BASE + path,
         params=params,
@@ -39,22 +53,11 @@ def get(path, params=None):
     return j["data"]
 
 
+# =========================================================
+# SYMBOL FILTER
+# =========================================================
+
 def get_symbols():
-    """
-    Bitget USDT-FUTURES 중
-    일반 코인 USDT 무기한 선물만 스캔한다.
-
-    포함:
-    - USDT 마진
-    - Perpetual
-    - 정상 거래
-    - 일반 코인
-
-    제외:
-    - Delivery
-    - RWA
-    - 주식/금 등 비코인 상품
-    """
 
     data = get(
         "/api/v2/mix/market/contracts",
@@ -63,17 +66,42 @@ def get_symbols():
         }
     )
 
-    return [
-        x["symbol"]
-        for x in data
-        if x.get("quoteCoin") == "USDT"
-        and x.get("symbolType") == "perpetual"
-        and x.get("symbolStatus") == "normal"
-        and x.get("isRwa") == "NO"
-    ]
+    symbols = []
 
+    for x in data:
+
+        # USDT 마진
+        if x.get("quoteCoin") != "USDT":
+            continue
+
+        # 무기한 선물
+        if x.get("symbolType") != "perpetual":
+            continue
+
+        # 정상 거래 상태
+        if x.get("symbolStatus") != "normal":
+            continue
+
+        # RWA 제외
+        if x.get("isRwa") != "NO":
+            continue
+
+        symbol = x.get("symbol")
+
+        if not symbol:
+            continue
+
+        symbols.append(symbol)
+
+    return symbols
+
+
+# =========================================================
+# TICKERS
+# =========================================================
 
 def get_all_tickers():
+
     data = get(
         "/api/v2/mix/market/tickers",
         {
@@ -87,7 +115,12 @@ def get_all_tickers():
     }
 
 
+# =========================================================
+# CANDLE DATA
+# =========================================================
+
 def get_candles(symbol, timeframe, limit=160):
+
     data = get(
         "/api/v2/mix/market/candles",
         {
@@ -119,6 +152,7 @@ def get_candles(symbol, timeframe, limit=160):
         "volume",
         "quote_volume"
     ]:
+
         df[c] = pd.to_numeric(
             df[c],
             errors="coerce"
@@ -126,22 +160,30 @@ def get_candles(symbol, timeframe, limit=160):
 
     df["ts"] = pd.to_numeric(df["ts"])
 
-    df = df.sort_values(
-        "ts"
-    ).reset_index(drop=True)
-
-    # 진행 중인 캔들은 제외
-    return (
-        df.iloc[:-1].copy()
-        if len(df) > 1
-        else df
+    df = (
+        df
+        .sort_values("ts")
+        .reset_index(drop=True)
     )
 
+    # 현재 진행 중인 봉 제외
+    if len(df) > 1:
+        df = df.iloc[:-1].copy()
+
+    return df
+
+
+# =========================================================
+# INDICATORS
+# =========================================================
 
 def add_indicators(df):
+
     df = df.copy()
 
+    # MA
     for n in (20, 60, 120):
+
         df[f"ma{n}"] = (
             df.close.rolling(n).mean()
         )
@@ -150,6 +192,7 @@ def add_indicators(df):
     delta = df.close.diff()
 
     gain = delta.clip(lower=0)
+
     loss = -delta.clip(upper=0)
 
     avg_gain = gain.ewm(
@@ -186,10 +229,16 @@ def add_indicators(df):
         axis=1
     ).max(axis=1)
 
-    df["atr14"] = tr.rolling(14).mean()
+    df["atr14"] = (
+        tr.rolling(14).mean()
+    )
 
     return df
 
+
+# =========================================================
+# SETUP CLASSIFICATION
+# =========================================================
 
 def classify_setup(
     ma20_dist,
@@ -202,18 +251,26 @@ def classify_setup(
     ma20_up,
     change24h
 ):
+
+    # -----------------------------------------------------
     # 과열
+    # -----------------------------------------------------
+
     if (
         ma20_dist > MAX_MA20_DISTANCE
         or rsi >= 75
         or change24h >= 12
     ):
+
         return (
             "🔴 추격 금지",
             "MA20 이격/RSI/24H 급등 중 하나가 과열 기준 초과"
         )
 
+    # -----------------------------------------------------
     # 진입 가능
+    # -----------------------------------------------------
+
     if (
         h_alignment
         and breakout
@@ -221,40 +278,53 @@ def classify_setup(
         and 50 <= rsi <= 70
         and vol_ratio >= MIN_VOL_RATIO
     ):
+
         return (
             "🟢 진입 가능",
             "추세 + 돌파 + 거래량 확인"
         )
 
+    # -----------------------------------------------------
     # 눌림 대기
+    # -----------------------------------------------------
+
     if (
         h_alignment
         and ma20_up
         and ma20_dist <= 0.035
         and 45 <= rsi <= 68
     ):
+
         return (
             "🟡 눌림 대기",
             "상승 추세 유지, MA20 부근 눌림 확인"
         )
 
+    # -----------------------------------------------------
     # 돌파 대기
+    # -----------------------------------------------------
+
     if (
         h_alignment
         and near_breakout
         and 45 <= rsi <= 70
     ):
+
         return (
             "🔵 돌파 대기",
             "20봉 고점 돌파 확인 필요"
         )
 
+    # -----------------------------------------------------
     # 4H 부분 정배열
+    # -----------------------------------------------------
+
     if (
         h_partial
         and ma20_up
         and 45 <= rsi <= 68
     ):
+
         return (
             "🟡 눌림 대기",
             "4H 추세는 양호하나 완전 정배열 전"
@@ -266,26 +336,39 @@ def classify_setup(
     )
 
 
+# =========================================================
+# ANALYSIS
+# =========================================================
+
 def analyze(
     symbol,
     df1h,
     df4h,
     ticker
 ):
+
     if (
         len(df1h) < 125
         or len(df4h) < 125
     ):
+
         return None
 
     a = add_indicators(df1h)
+
     b = add_indicators(df4h)
 
     x = a.iloc[-1]
+
     prev = a.iloc[-2]
 
     h = b.iloc[-1]
+
     hprev = b.iloc[-2]
+
+    # -----------------------------------------------------
+    # Market data
+    # -----------------------------------------------------
 
     price = float(
         ticker["lastPr"]
@@ -299,15 +382,29 @@ def analyze(
         ticker.get("change24h") or 0
     ) * 100
 
+    # -----------------------------------------------------
+    # 1H MA
+    # -----------------------------------------------------
+
     ma20 = x.ma20
     ma60 = x.ma60
     ma120 = x.ma120
+
+    # -----------------------------------------------------
+    # 4H MA
+    # -----------------------------------------------------
 
     h20 = h.ma20
     h60 = h.ma60
     h120 = h.ma120
 
-    atr = float(x.atr14)
+    atr = float(
+        x.atr14
+    )
+
+    # -----------------------------------------------------
+    # NaN check
+    # -----------------------------------------------------
 
     if any(
         pd.isna(v)
@@ -322,17 +419,29 @@ def analyze(
             x.atr14
         ]
     ):
+
         return None
 
-    # 24H 거래대금 필터
+    # -----------------------------------------------------
+    # 거래대금 필터
+    # -----------------------------------------------------
+
     if turnover < MIN_24H_TURNOVER:
         return None
 
+    # -----------------------------------------------------
     # 1H 완전 정배열
+    # -----------------------------------------------------
+
     if not (
         price > ma20 > ma60 > ma120
     ):
+
         return None
+
+    # -----------------------------------------------------
+    # MA 방향
+    # -----------------------------------------------------
 
     ma20_up = bool(
         ma20 > prev.ma20
@@ -346,16 +455,27 @@ def analyze(
         ma120 >= prev.ma120
     )
 
-    # 직전 20개 완성봉 평균 거래량
+    # -----------------------------------------------------
+    # 거래량 비율
+    # -----------------------------------------------------
+
     avg20_vol = (
         a.volume.iloc[-21:-1].mean()
     )
 
-    vol_ratio = (
-        float(x.volume / avg20_vol)
-        if avg20_vol
-        else 0.0
-    )
+    if avg20_vol:
+
+        vol_ratio = float(
+            x.volume / avg20_vol
+        )
+
+    else:
+
+        vol_ratio = 0.0
+
+    # -----------------------------------------------------
+    # MA20 이격
+    # -----------------------------------------------------
 
     ma20_dist = float(
         price / ma20 - 1
@@ -365,10 +485,17 @@ def analyze(
         x.rsi14
     )
 
+    # -----------------------------------------------------
     # 최근 20봉 고점
+    # -----------------------------------------------------
+
     recent_high_20 = float(
         a.high.iloc[-21:-1].max()
     )
+
+    # -----------------------------------------------------
+    # Breakout
+    # -----------------------------------------------------
 
     breakout = bool(
         price >= recent_high_20
@@ -379,19 +506,29 @@ def analyze(
         and price >= recent_high_20 * 0.99
     )
 
+    # -----------------------------------------------------
     # 4H 완전 정배열
+    # -----------------------------------------------------
+
     h_alignment = bool(
         h.close > h20 > h60 > h120
         and h20 > hprev.ma20
         and h60 >= hprev.ma60
     )
 
+    # -----------------------------------------------------
     # 4H 부분 정배열
+    # -----------------------------------------------------
+
     h_partial = bool(
         h.close > h20
         and h20 > h60
         and h20 > hprev.ma20
     )
+
+    # -----------------------------------------------------
+    # Classification
+    # -----------------------------------------------------
 
     classification, setup_reason = classify_setup(
         ma20_dist,
@@ -405,7 +542,10 @@ def analyze(
         change24h
     )
 
-    # 기본 점수
+    # =====================================================
+    # SCORE
+    # =====================================================
+
     score = 25
 
     score += (
@@ -420,7 +560,7 @@ def analyze(
         3 if ma120_up else 0
     )
 
-    # 거래량 점수
+    # 거래량
     score += (
         15 if vol_ratio >= 2
         else 12 if vol_ratio >= 1.5
@@ -428,7 +568,7 @@ def analyze(
         else 0
     )
 
-    # 거래대금 점수
+    # 거래대금
     score += (
         15 if turnover >= 300_000_000
         else 12 if turnover >= 100_000_000
@@ -454,10 +594,12 @@ def analyze(
         else 0
     )
 
+    # Breakout
     score += (
         5 if breakout else 0
     )
 
+    # 4H
     score += (
         5 if h_alignment
         else 2 if h_partial
@@ -469,19 +611,22 @@ def analyze(
         100
     )
 
-    # 진입 기준
+    # =====================================================
+    # ENTRY / STOP / TARGET
+    # =====================================================
+
     entry_reference = (
         recent_high_20
         if breakout
         else price
     )
 
-    # MA20 기준 손절
+    # MA20 stop
     ma_stop = float(
         ma20 * 0.99
     )
 
-    # ATR 기준 손절
+    # ATR stop
     atr_stop = float(
         entry_reference - 1.5 * atr
     )
@@ -492,50 +637,98 @@ def analyze(
     )
 
     if reference_stop <= 0:
+
         reference_stop = ma_stop
 
     risk = float(
-        entry_reference - reference_stop
+        entry_reference -
+        reference_stop
     )
 
-    # 2R 목표
+    # 2R
     target_1 = (
         float(
-            entry_reference + 2 * risk
+            entry_reference +
+            2 * risk
         )
         if risk > 0
         else float(entry_reference)
     )
 
     stop_distance_pct = (
-        risk / entry_reference * 100
+        risk /
+        entry_reference *
+        100
         if entry_reference > 0
         else 0.0
     )
 
+    # =====================================================
+    # RESULT
+    # =====================================================
+
     return {
+
         "symbol": symbol,
+
         "score": score,
-        "classification": classification,
-        "setup_reason": setup_reason,
-        "price": price,
-        "entry_reference": entry_reference,
-        "reference_stop": reference_stop,
-        "target_1_2R": target_1,
-        "stop_distance_pct": stop_distance_pct,
-        "ma20_dist_pct": ma20_dist * 100,
-        "vol_ratio": vol_ratio,
-        "turnover_24h": turnover,
-        "rsi14": rsi,
-        "atr14": atr,
-        "breakout_20h": breakout,
-        "near_breakout": near_breakout,
-        "4h_alignment": h_alignment,
-        "24h_change_pct": change24h,
+
+        "classification":
+            classification,
+
+        "setup_reason":
+            setup_reason,
+
+        "price":
+            price,
+
+        "entry_reference":
+            entry_reference,
+
+        "reference_stop":
+            reference_stop,
+
+        "target_1_2R":
+            target_1,
+
+        "stop_distance_pct":
+            stop_distance_pct,
+
+        "ma20_dist_pct":
+            ma20_dist * 100,
+
+        "vol_ratio":
+            vol_ratio,
+
+        "turnover_24h":
+            turnover,
+
+        "rsi14":
+            rsi,
+
+        "atr14":
+            atr,
+
+        "breakout_20h":
+            breakout,
+
+        "near_breakout":
+            near_breakout,
+
+        "4h_alignment":
+            h_alignment,
+
+        "24h_change_pct":
+            change24h
     }
 
 
+# =========================================================
+# TELEGRAM
+# =========================================================
+
 def telegram_send(out):
+
     token = os.getenv(
         "TELEGRAM_BOT_TOKEN"
     )
@@ -545,37 +738,70 @@ def telegram_send(out):
     )
 
     if not token or not chat_id:
+
         print(
             "⚠️ Telegram Secret이 없습니다."
         )
+
         return
 
-    rows = out.head(TOP_N)
+    rows = out.head(
+        TOP_N
+    )
 
     lines = [
+
         "🔥 BITGET 1H / 4H LONG CANDIDATES v2.2",
+
         "",
-        "📌 일반 코인 USDT 무기한 선물",
+
+        "📌 USDT-FUTURES",
+
+        "📌 일반 Perpetual",
+
+        "📌 RWA 제외",
+
         "📌 24H 거래대금 ≥ 10M USDT",
+
         ""
     ]
 
     for _, r in rows.iterrows():
+
         lines.append(
+
             f"{r['symbol']} | "
             f"{r['score']} | "
             f"{r['classification']}\n"
+
             f"{r['setup_reason']}\n"
-            f"현재가: {r['price']:.8g}\n"
-            f"진입기준: {r['entry_reference']:.8g}\n"
-            f"손절기준: {r['reference_stop']:.8g}\n"
-            f"2R 목표: {r['target_1_2R']:.8g}\n"
+
+            f"현재가: "
+            f"{r['price']:.8g}\n"
+
+            f"진입기준: "
+            f"{r['entry_reference']:.8g}\n"
+
+            f"손절기준: "
+            f"{r['reference_stop']:.8g}\n"
+
+            f"2R 목표: "
+            f"{r['target_1_2R']:.8g}\n"
+
             f"손절거리: "
             f"{r['stop_distance_pct']:.2f}%\n"
-            f"RSI: {r['rsi14']:.1f}\n"
+
+            f"RSI: "
+            f"{r['rsi14']:.1f}\n"
+
+            f"거래량: "
+            f"{r['vol_ratio']:.2f}x\n"
+
         )
 
-    message = "\n".join(lines)
+    message = "\n".join(
+        lines
+    )
 
     url = (
         f"https://api.telegram.org/"
@@ -583,13 +809,17 @@ def telegram_send(out):
     )
 
     try:
+
         response = requests.post(
+
             url,
+
             data={
                 "chat_id": chat_id,
-                "text": message,
+                "text": message
             },
-            timeout=10,
+
+            timeout=10
         )
 
         response.raise_for_status()
@@ -597,53 +827,91 @@ def telegram_send(out):
         result = response.json()
 
         if not result.get("ok"):
-            raise RuntimeError(result)
+
+            raise RuntimeError(
+                result
+            )
 
         print(
             "📨 Telegram 전송 완료"
         )
 
     except Exception as e:
+
         print(
             f"⚠️ Telegram 전송 실패: {e}"
         )
 
 
+# =========================================================
+# MAIN
+# =========================================================
+
 def main():
+
+    print(
+        "\n"
+        "============================================"
+    )
+
+    print(
+        "🔥 BITGET 1H / 4H LONG SCANNER v2.2"
+    )
+
+    print(
+        "============================================"
+    )
+
     symbols = get_symbols()
 
     tickers = get_all_tickers()
 
+    # -----------------------------------------------------
+    # 거래대금 필터
+    # -----------------------------------------------------
+
     liquid = [
+
         s
+
         for s in symbols
+
         if s in tickers
+
         and float(
-            tickers[s].get("usdtVolume") or 0
+            tickers[s].get(
+                "usdtVolume"
+            ) or 0
         ) >= MIN_24H_TURNOVER
+
     ]
 
     print(
         f"비트겟 USDT-FUTURES "
-        f"일반 코인 PERPETUAL 종목: "
+        f"일반 Perpetual 종목: "
         f"{len(symbols)}개"
     )
 
     print(
-        f"RWA 제외 + 정상 거래 종목 중 "
-        f"24H USDT 거래대금 "
-        f"{MIN_24H_TURNOVER:,.0f} 이상: "
+        f"24H 거래대금 "
+        f"{MIN_24H_TURNOVER:,.0f} USDT 이상: "
         f"{len(liquid)}개"
     )
 
     print(
-        "1H/4H 완성봉 기준으로 스캔합니다."
+        "1H / 4H 완성봉 기준으로 스캔합니다."
     )
 
     print(
-        "v2.2: 진입/눌림/돌파/추격 구분 + "
-        "기준 손절/2R 목표를 계산합니다.\n"
+        "거래량 기준: 평균 대비 "
+        f"{MIN_VOL_RATIO:.2f}x 이상"
     )
+
+    print()
+
+    # =====================================================
+    # SCAN
+    # =====================================================
 
     results = []
 
@@ -651,76 +919,123 @@ def main():
         liquid,
         1
     ):
+
         try:
+
+            df1h = get_candles(
+                symbol,
+                "1H"
+            )
+
+            df4h = get_candles(
+                symbol,
+                "4H"
+            )
+
             r = analyze(
                 symbol,
-                get_candles(
-                    symbol,
-                    "1H"
-                ),
-                get_candles(
-                    symbol,
-                    "4H"
-                ),
+                df1h,
+                df4h,
                 tickers[symbol]
             )
 
             if r:
+
                 results.append(r)
 
         except Exception as e:
+
             print(
-                f"[skip] {symbol}: {e}"
+                f"[skip] "
+                f"{symbol}: {e}"
             )
 
-        time.sleep(0.03)
+        time.sleep(
+            0.03
+        )
 
         if i % 50 == 0:
+
             print(
-                f"진행: {i}/{len(liquid)}"
+                f"진행: "
+                f"{i}/{len(liquid)}"
             )
 
+    # =====================================================
+    # NO RESULT
+    # =====================================================
+
     if not results:
+
         print(
             "\n현재 조건을 만족하는 "
             "종목이 없습니다."
         )
+
         return
+
+    # =====================================================
+    # DATAFRAME
+    # =====================================================
 
     out = pd.DataFrame(
         results
     )
 
     class_rank = {
+
         "🟢 진입 가능": 0,
+
         "🟡 눌림 대기": 1,
+
         "🔵 돌파 대기": 2,
+
         "⚪ 관찰": 3,
+
         "🔴 추격 금지": 4
     }
 
     out["class_rank"] = (
+
         out["classification"]
+
         .map(class_rank)
+
         .fillna(9)
+
     )
 
-    out = out.sort_values(
-        [
-            "class_rank",
-            "score",
-            "4h_alignment",
-            "vol_ratio",
-            "turnover_24h"
-        ],
-        ascending=[
-            True,
-            False,
-            False,
-            False,
-            False
-        ]
-    ).head(TOP_N)
+    out = (
+
+        out
+
+        .sort_values(
+
+            [
+                "class_rank",
+                "score",
+                "4h_alignment",
+                "vol_ratio",
+                "turnover_24h"
+            ],
+
+            ascending=[
+                True,
+                False,
+                False,
+                False,
+                False
+            ]
+
+        )
+
+        .head(TOP_N)
+
+    )
+
+    # =====================================================
+    # DISPLAY
+    # =====================================================
 
     pd.set_option(
         "display.max_columns",
@@ -733,22 +1048,39 @@ def main():
     )
 
     cols = [
+
         "symbol",
+
         "score",
+
         "classification",
+
         "setup_reason",
+
         "price",
+
         "entry_reference",
+
         "reference_stop",
+
         "target_1_2R",
+
         "stop_distance_pct",
+
         "ma20_dist_pct",
+
         "vol_ratio",
+
         "turnover_24h",
+
         "rsi14",
+
         "breakout_20h",
+
         "near_breakout",
+
         "4h_alignment",
+
         "24h_change_pct"
     ]
 
@@ -766,9 +1098,13 @@ def main():
     )
 
     print(
+
         out[cols].to_string(
+
             index=False,
+
             formatters={
+
                 "price":
                     "{:,.8g}".format,
 
@@ -797,17 +1133,23 @@ def main():
                     "{:.1f}".format,
 
                 "24h_change_pct":
-                    "{:+.2f}%".format,
+                    "{:+.2f}%".format
             }
         )
     )
+
+    # =====================================================
+    # SAVE CSV
+    # =====================================================
 
     out.drop(
         columns=[
             "class_rank"
         ]
     ).to_csv(
+
         "bitget_1h_long_candidates_v2_2.csv",
+
         index=False
     )
 
@@ -830,8 +1172,19 @@ def main():
         "※ 자동 주문 기능은 없습니다."
     )
 
-    telegram_send(out)
+    # =====================================================
+    # TELEGRAM
+    # =====================================================
 
+    telegram_send(
+        out
+    )
+
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
+
     main()
