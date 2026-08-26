@@ -2,6 +2,7 @@ name: Bitget 4H-15M Signal Scanner
 
 on:
   workflow_dispatch:
+
   schedule:
     # GitHub Actions cron is UTC.
     # Run around every 15-minute candle close.
@@ -25,8 +26,8 @@ jobs:
 
       - name: Run signal scanner
         env:
-          TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_SIGNAL_BOT_TOKEN }}
-          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_SIGNAL_CHAT_ID }}
+          TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_4H15M_BOT_TOKEN }}
+          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_4H15M_CHAT_ID }}
         run: |
           python bitget_4h_15m_signal_scanner.py
 
