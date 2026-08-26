@@ -2,6 +2,7 @@ name: Bitget 4H 15M CISD Scanner
 
 on:
   workflow_dispatch:
+  
   schedule:
     - cron: "1,16,31,46 * * * *"
 
