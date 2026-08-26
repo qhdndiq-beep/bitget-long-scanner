@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Structure Scanner v2.2
+Bitget 4H -> 15M Structure Scanner v2.3
 
 FLOW
 ----
@@ -15,18 +15,20 @@ FLOW
         ↓
 15M STRUCTURE CANDIDATE
 
-v2.2 PURPOSE
-------------
-v2.0에서 검증된 4H Sweep -> CISD -> Recency 이벤트를
-15M 실제 Swing Structure Break와 연결한다.
+v2.3 PURPOSE
+-------------
+v2.2에서 발견된 15M API 400 오류 수정.
 
-v2.2에서는 조건을 완화하지 않는다.
+IMPORTANT
+---------
+15M Structure 조건은 v2.2와 동일하다.
+조건 완화 없음.
 
-목적:
-"왜 4H 이벤트가 15M Structure로 연결되지 않는가?"
-를 정확하게 진단한다.
-
-Pullback / FVG / OB / Confirmation은 아직 사용하지 않는다.
+주요 수정:
+- Bitget history-candles limit 최대 200 대응
+- 15M DATA SUCCESS / ERROR 진단
+- 개별 종목 API 오류는 해당 종목만 SKIP
+- 4H EVENT가 없는 종목은 15M API 호출하지 않음
 
 No trading orders are placed.
 """
@@ -57,7 +59,9 @@ BASE_URL = "https://api.bitget.com"
 PRODUCT_TYPE = "USDT-FUTURES"
 
 HISTORY_LIMIT_4H = 200
-HISTORY_LIMIT_15M = 300
+
+# Bitget history-candles API maximum
+HISTORY_LIMIT_15M = 200
 
 MAX_WORKERS = 8
 
@@ -157,7 +161,7 @@ def get_json(
                 url,
                 headers={
                     "User-Agent":
-                        "bitget-4h15m-structure-scanner/2.2",
+                        "bitget-4h15m-structure-scanner/2.3",
                     "Accept":
                         "application/json",
                 },
@@ -796,6 +800,8 @@ def analyze_symbol(
         "long_candidate": None,
         "short_candidate": None,
 
+        "fifteen_min_status": "NOT_REQUESTED",
+
         "error_stage": None,
         "error": None,
     }
@@ -952,7 +958,15 @@ def analyze_symbol(
             HISTORY_LIMIT_15M
         )
 
+        result[
+            "fifteen_min_status"
+        ] = "SUCCESS"
+
     except Exception as exc:
+
+        result[
+            "fifteen_min_status"
+        ] = "ERROR"
 
         result["error_stage"] = "15M_CANDLES"
         result["error"] = str(exc)
@@ -960,6 +974,10 @@ def analyze_symbol(
         return result
 
     if len(c15) < 100:
+
+        result[
+            "fifteen_min_status"
+        ] = "ERROR"
 
         result["error_stage"] = "15M_DATA_LENGTH"
 
@@ -1327,9 +1345,27 @@ def build_report(
         short_structure
     )
 
+    # ========================================================
+    # 15M DATA STATUS
+    # ========================================================
+
+    fifteen_success = [
+        x
+        for x in diagnostics
+        if x.get("fifteen_min_status")
+        == "SUCCESS"
+    ]
+
+    fifteen_errors = [
+        x
+        for x in diagnostics
+        if x.get("fifteen_min_status")
+        == "ERROR"
+    ]
+
     lines = [
 
-        "🔎 4H→15M Structure Scanner v2.2",
+        "🔎 4H→15M Structure Scanner v2.3",
 
         now,
 
@@ -1341,7 +1377,7 @@ def build_report(
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
-        "🔬 v2.2 DIAGNOSTIC",
+        "🔬 v2.3 DIAGNOSTIC",
 
         "━━━━━━━━━━━━━━━━━━━━━━",
 
@@ -1355,7 +1391,17 @@ def build_report(
 
         "",
 
-        "② 15M Structure",
+        "② 15M DATA",
+
+        f"   └ SUCCESS : "
+        f"{len(fifteen_success)}",
+
+        f"   └ ERROR   : "
+        f"{len(fifteen_errors)}",
+
+        "",
+
+        "③ 15M Structure",
 
         f"   └ LONG  : "
         f"{len(long_structure)}",
@@ -1389,8 +1435,6 @@ def build_report(
             ""
         ]
 
-        # 같은 오류가 수백 개 반복될 경우
-        # 대표 10개만 표시
         for item in error_items[:10]:
 
             lines.append(
@@ -1471,7 +1515,7 @@ def main() -> None:
     print(
         "\n"
         "============================================\n"
-        " Bitget 4H -> 15M Structure Scanner v2.2\n"
+        " Bitget 4H -> 15M Structure Scanner v2.3\n"
         "============================================\n"
     )
 
@@ -1590,6 +1634,8 @@ def main() -> None:
                         None,
                     "short_candidate":
                         None,
+                    "fifteen_min_status":
+                        "ERROR",
                 })
 
                 print(
