@@ -11,7 +11,6 @@ PRODUCT_TYPE = "USDT-FUTURES"
 # =========================================================
 
 # 24H 최소 거래대금
-# 기존 30,000,000 → 10,000,000 USDT
 MIN_24H_TURNOVER = 10_000_000
 
 # 현재 봉 거래량 / 직전 20개 완성봉 평균 거래량
@@ -22,7 +21,6 @@ MAX_MA20_DISTANCE = 0.06
 
 # Telegram / 결과 출력 개수
 TOP_N = 10
-
 
 session = requests.Session()
 
@@ -70,19 +68,15 @@ def get_symbols():
 
     for x in data:
 
-        # USDT 마진
         if x.get("quoteCoin") != "USDT":
             continue
 
-        # 무기한 선물
         if x.get("symbolType") != "perpetual":
             continue
 
-        # 정상 거래 상태
         if x.get("symbolStatus") != "normal":
             continue
 
-        # RWA 제외
         if x.get("isRwa") != "NO":
             continue
 
@@ -337,6 +331,67 @@ def classify_setup(
 
 
 # =========================================================
+# RISK SCORE
+# =========================================================
+
+def calculate_risk_score(stop_distance_pct):
+
+    """
+    손절거리를 점수에 직접 반영.
+
+    짧을수록 무조건 최고점으로 만들되,
+    0~1% 구간만 25점 만점으로 제한한다.
+
+    25점
+    ≤ 1.00%
+
+    22점
+    1.01 ~ 1.50%
+
+    19점
+    1.51 ~ 2.00%
+
+    16점
+    2.01 ~ 2.50%
+
+    12점
+    2.51 ~ 3.00%
+
+    8점
+    3.01 ~ 3.50%
+
+    4점
+    3.51 ~ 4.00%
+
+    0점
+    > 4.00%
+    """
+
+    if stop_distance_pct <= 1.00:
+        return 25
+
+    if stop_distance_pct <= 1.50:
+        return 22
+
+    if stop_distance_pct <= 2.00:
+        return 19
+
+    if stop_distance_pct <= 2.50:
+        return 16
+
+    if stop_distance_pct <= 3.00:
+        return 12
+
+    if stop_distance_pct <= 3.50:
+        return 8
+
+    if stop_distance_pct <= 4.00:
+        return 4
+
+    return 0
+
+
+# =========================================================
 # ANALYSIS
 # =========================================================
 
@@ -543,75 +598,6 @@ def analyze(
     )
 
     # =====================================================
-    # SCORE
-    # =====================================================
-
-    score = 25
-
-    score += (
-        7 if ma20_up else 0
-    )
-
-    score += (
-        5 if ma60_up else 0
-    )
-
-    score += (
-        3 if ma120_up else 0
-    )
-
-    # 거래량
-    score += (
-        15 if vol_ratio >= 2
-        else 12 if vol_ratio >= 1.5
-        else 8 if vol_ratio >= MIN_VOL_RATIO
-        else 0
-    )
-
-    # 거래대금
-    score += (
-        15 if turnover >= 300_000_000
-        else 12 if turnover >= 100_000_000
-        else 8
-    )
-
-    # MA20 이격
-    score += (
-        10 if ma20_dist <= 0.03
-        else 7 if ma20_dist <= 0.05
-        else 4 if ma20_dist <= MAX_MA20_DISTANCE
-        else 0
-    )
-
-    # RSI
-    score += (
-        10 if 50 <= rsi <= 68
-        else 6 if (
-            45 <= rsi < 50
-            or 68 < rsi <= 72
-        )
-        else 3 if 40 <= rsi < 45
-        else 0
-    )
-
-    # Breakout
-    score += (
-        5 if breakout else 0
-    )
-
-    # 4H
-    score += (
-        5 if h_alignment
-        else 2 if h_partial
-        else 0
-    )
-
-    score = min(
-        int(score),
-        100
-    )
-
-    # =====================================================
     # ENTRY / STOP / TARGET
     # =====================================================
 
@@ -631,6 +617,10 @@ def analyze(
         entry_reference - 1.5 * atr
     )
 
+    # -----------------------------------------------------
+    # 기존 방식 유지
+    # -----------------------------------------------------
+
     reference_stop = min(
         ma_stop,
         atr_stop
@@ -645,7 +635,10 @@ def analyze(
         reference_stop
     )
 
+    # -----------------------------------------------------
     # 2R
+    # -----------------------------------------------------
+
     target_1 = (
         float(
             entry_reference +
@@ -661,6 +654,128 @@ def analyze(
         100
         if entry_reference > 0
         else 0.0
+    )
+
+    # =====================================================
+    # NEW SCORE
+    # =====================================================
+    #
+    # 총 100점
+    #
+    # 기술적 구조 = 75점
+    # 리스크       = 25점
+    #
+    # -----------------------------------------------------
+    # 기술적 구조 75점
+    # -----------------------------------------------------
+    #
+    # 기본 추세       15
+    # MA20 상승        6
+    # MA60 상승        4
+    # MA120 상승       2
+    # 거래량          12
+    # 거래대금        10
+    # MA20 이격       10
+    # RSI              8
+    # Breakout         4
+    # 4H 구조          4
+    #
+    # 합계 = 75
+    # -----------------------------------------------------
+
+    score = 15
+
+    # MA 방향
+    score += (
+        6 if ma20_up else 0
+    )
+
+    score += (
+        4 if ma60_up else 0
+    )
+
+    score += (
+        2 if ma120_up else 0
+    )
+
+    # -----------------------------------------------------
+    # 거래량
+    # -----------------------------------------------------
+
+    score += (
+        12 if vol_ratio >= 2
+        else 10 if vol_ratio >= 1.5
+        else 7 if vol_ratio >= MIN_VOL_RATIO
+        else 0
+    )
+
+    # -----------------------------------------------------
+    # 거래대금
+    # -----------------------------------------------------
+
+    score += (
+        10 if turnover >= 300_000_000
+        else 8 if turnover >= 100_000_000
+        else 5
+    )
+
+    # -----------------------------------------------------
+    # MA20 이격
+    # -----------------------------------------------------
+
+    score += (
+        10 if ma20_dist <= 0.03
+        else 8 if ma20_dist <= 0.04
+        else 6 if ma20_dist <= 0.05
+        else 3 if ma20_dist <= MAX_MA20_DISTANCE
+        else 0
+    )
+
+    # -----------------------------------------------------
+    # RSI
+    # -----------------------------------------------------
+
+    score += (
+        8 if 50 <= rsi <= 68
+        else 5 if (
+            45 <= rsi < 50
+            or 68 < rsi <= 72
+        )
+        else 2 if 40 <= rsi < 45
+        else 0
+    )
+
+    # -----------------------------------------------------
+    # Breakout
+    # -----------------------------------------------------
+
+    score += (
+        4 if breakout else 0
+    )
+
+    # -----------------------------------------------------
+    # 4H
+    # -----------------------------------------------------
+
+    score += (
+        4 if h_alignment
+        else 2 if h_partial
+        else 0
+    )
+
+    # -----------------------------------------------------
+    # RISK SCORE
+    # -----------------------------------------------------
+
+    risk_score = calculate_risk_score(
+        stop_distance_pct
+    )
+
+    score += risk_score
+
+    score = min(
+        int(score),
+        100
     )
 
     # =====================================================
@@ -693,6 +808,9 @@ def analyze(
 
         "stop_distance_pct":
             stop_distance_pct,
+
+        "risk_score":
+            risk_score,
 
         "ma20_dist_pct":
             ma20_dist * 100,
@@ -763,6 +881,10 @@ def telegram_send(out):
 
         "📌 24H 거래대금 ≥ 10M USDT",
 
+        "",
+
+        "📊 점수 = 구조 75 + 리스크 25",
+
         ""
     ]
 
@@ -790,6 +912,9 @@ def telegram_send(out):
 
             f"손절거리: "
             f"{r['stop_distance_pct']:.2f}%\n"
+
+            f"리스크점수: "
+            f"{r['risk_score']}/25\n"
 
             f"RSI: "
             f"{r['rsi14']:.1f}\n"
@@ -860,6 +985,10 @@ def main():
 
     print(
         "============================================"
+    )
+
+    print(
+        "📊 NEW SCORE: 구조 75 + 리스크 25"
     )
 
     symbols = get_symbols()
@@ -1005,6 +1134,14 @@ def main():
 
     )
 
+    # -----------------------------------------------------
+    # 정렬
+    #
+    # 이제 점수를 가장 먼저 본다.
+    # 점수가 같거나 비슷한 경우에만
+    # 실제 매매 상태(classification)를 사용.
+    # -----------------------------------------------------
+
     out = (
 
         out
@@ -1012,14 +1149,16 @@ def main():
         .sort_values(
 
             [
-                "class_rank",
                 "score",
+                "class_rank",
                 "4h_alignment",
+                "risk_score",
                 "vol_ratio",
                 "turnover_24h"
             ],
 
             ascending=[
+                False,
                 True,
                 False,
                 False,
@@ -1053,6 +1192,8 @@ def main():
 
         "score",
 
+        "risk_score",
+
         "classification",
 
         "setup_reason",
@@ -1085,7 +1226,7 @@ def main():
     ]
 
     print(
-        "\n" + "=" * 125
+        "\n" + "=" * 140
     )
 
     print(
@@ -1094,7 +1235,11 @@ def main():
     )
 
     print(
-        "=" * 125
+        "📊 SCORE = STRUCTURE 75 + RISK 25"
+    )
+
+    print(
+        "=" * 140
     )
 
     print(
@@ -1159,8 +1304,8 @@ def main():
     )
 
     print(
-        "※ 분류/점수/가격은 후보 선별용 "
-        "참고값이며 매매 신호가 아닙니다."
+        "※ 점수는 구조/리스크를 종합한 "
+        "후보 선별용 참고값입니다."
     )
 
     print(
