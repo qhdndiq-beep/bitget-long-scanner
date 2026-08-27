@@ -6,9 +6,9 @@ on:
   schedule:
     # GitHub Actions cron is UTC.
     # Run around every 15-minute candle close.
-    - cron: "2,17,32,47 * * * *"
-
-jobs:
+    - cron: "3,18,33,48 * * * *"
+    
+    jobs:
   scan:
     runs-on: ubuntu-latest
 
