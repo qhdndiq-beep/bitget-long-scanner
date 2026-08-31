@@ -11,11 +11,16 @@ FLOW
         ↓
 4H Recency
         ↓
-15M CURRENT CLOSED candle structure break
+4H+ KEY LEVEL
+(Demand / Supply / Order Block)
+        ↓
+15M CURRENT CLOSED candle
+        ↓
+15M Structure Break
         ↓
 Box / Fake-breakout filter
         ↓
-Signal quality score
+100-point Signal Quality Score
         ↓
 Minimum score filter
         ↓
@@ -25,13 +30,20 @@ Telegram
 
 IMPORTANT
 ---------
+- This is the third scanner:
+  bitget_4h_15m_signal_scanner.py
 - Existing v2.6 scanner is NOT modified.
 - Only the latest CLOSED 15M candle can generate a signal.
 - Historical 15M structure breaks are NOT replayed.
-- Absolute volume is NOT used for ranking.
-- Relative Volume (RVOL) is used instead.
+- Absolute volume is NOT used.
+- Relative Volume (RVOL) is used only as a secondary factor.
+- 4H+ Key Level is a major filter.
+- Key Level types:
+    * Demand
+    * Supply
+    * Order Block
 - Maximum 10 signals are sent.
-- Signals below minimum score are rejected.
+- Score is exactly 100 points.
 - No trading orders are placed.
 """
 
@@ -102,10 +114,35 @@ ATR_PERIOD = 14
 
 
 # ============================================================
+# KEY LEVEL
+# ============================================================
+
+KEY_LEVEL_LOOKBACK_4H = 80
+
+KEY_LEVEL_ATR_PERIOD = 14
+
+# How close the current 15M price can be to a 4H level.
+# Measured using 4H ATR.
+KEY_LEVEL_MAX_DISTANCE_ATR = 0.75
+
+# Minimum score required from Key Level itself.
+# This prevents completely unrelated price areas
+# from becoming signals.
+MIN_KEY_LEVEL_SCORE = 10.0
+
+# Minimum quality of a 4H departure candle
+MIN_DEPARTURE_BODY_RATIO = 0.45
+
+# Maximum number of key levels kept per direction.
+MAX_KEY_LEVELS_PER_DIRECTION = 12
+
+
+# ============================================================
 # SIGNAL QUALITY SCORE
 # ============================================================
 
 MIN_SIGNAL_SCORE = 65
+
 MAX_TELEGRAM_SIGNALS = 10
 
 RVOL_PERIOD = 20
@@ -384,19 +421,21 @@ def true_range(
     )
 
 
-def atr(
+def atr_at(
     candles: List[Candle],
+    index: int,
     period: int = ATR_PERIOD,
 ) -> Optional[float]:
 
-    if len(candles) < period + 1:
+    if index <= 0:
         return None
 
-    end = len(candles) - 1
+    if index < period:
+        return None
 
     start = max(
         1,
-        end - period + 1,
+        index - period + 1,
     )
 
     values = [
@@ -406,7 +445,7 @@ def atr(
         )
         for i in range(
             start,
-            end + 1,
+            index + 1,
         )
     ]
 
@@ -414,6 +453,21 @@ def atr(
         return None
 
     return sum(values) / len(values)
+
+
+def atr(
+    candles: List[Candle],
+    period: int = ATR_PERIOD,
+) -> Optional[float]:
+
+    if not candles:
+        return None
+
+    return atr_at(
+        candles,
+        len(candles) - 1,
+        period,
+    )
 
 
 # ============================================================
@@ -572,6 +626,424 @@ def find_cisd_after_sweep(
 
 
 # ============================================================
+# 4H+ KEY LEVEL DETECTION
+# ============================================================
+
+def build_key_levels(
+    candles: List[Candle],
+    direction: str,
+) -> List[Dict[str, Any]]:
+
+    """
+    Build practical 4H key levels.
+
+    LONG:
+        Demand + Bullish Order Block
+
+    SHORT:
+        Supply + Bearish Order Block
+
+    The goal is NOT to claim that every detected candle
+    is a textbook institutional order block.
+
+    Instead, this scanner creates a systematic price zone
+    from historical 4H displacement candles.
+    """
+
+    levels: List[Dict[str, Any]] = []
+
+    if len(candles) < 30:
+        return levels
+
+    end = len(candles) - 1
+
+    start = max(
+        2,
+        end - KEY_LEVEL_LOOKBACK_4H + 1,
+    )
+
+    for i in range(
+        start,
+        end + 1,
+    ):
+
+        current = candles[i]
+
+        current_atr = atr_at(
+            candles,
+            i,
+            KEY_LEVEL_ATR_PERIOD,
+        )
+
+        if current_atr is None:
+            continue
+
+        current_body = (
+            body_ratio(current)
+        )
+
+        if (
+            current_body
+            < MIN_DEPARTURE_BODY_RATIO
+        ):
+            continue
+
+        # ----------------------------------------------------
+        # LONG SIDE
+        # ----------------------------------------------------
+
+        if direction == "LONG":
+
+            if not bullish(current):
+                continue
+
+            # Strong bullish displacement.
+            displacement = (
+                current.c
+                - current.o
+            )
+
+            if displacement <= 0:
+                continue
+
+            # Previous candle becomes the main
+            # demand / bullish OB candidate.
+            previous = candles[i - 1]
+
+            # Zone based on previous candle body + wick.
+            zone_low = previous.l
+
+            zone_high = max(
+                previous.o,
+                previous.c,
+            )
+
+            # If the previous candle is extremely small,
+            # use a minimum ATR-based zone width.
+            if (
+                zone_high - zone_low
+                < current_atr * 0.10
+            ):
+
+                zone_high = (
+                    zone_low
+                    + current_atr * 0.10
+                )
+
+            level_type = (
+                "Demand"
+                if bearish(previous)
+                else "Bullish OB"
+            )
+
+            strength = 0.0
+
+            if current_body >= 0.70:
+                strength += 10
+            elif current_body >= 0.55:
+                strength += 8
+            else:
+                strength += 6
+
+            if (
+                displacement
+                >= current_atr * 0.75
+            ):
+                strength += 8
+            elif (
+                displacement
+                >= current_atr * 0.50
+            ):
+                strength += 6
+            elif (
+                displacement
+                >= current_atr * 0.30
+            ):
+                strength += 4
+
+            levels.append(
+                {
+                    "direction": direction,
+                    "type": level_type,
+                    "low": zone_low,
+                    "high": zone_high,
+                    "index": i - 1,
+                    "ts": previous.ts,
+                    "strength":
+                        min(strength, 18.0),
+                }
+            )
+
+        # ----------------------------------------------------
+        # SHORT SIDE
+        # ----------------------------------------------------
+
+        else:
+
+            if not bearish(current):
+                continue
+
+            displacement = (
+                current.o
+                - current.c
+            )
+
+            if displacement <= 0:
+                continue
+
+            previous = candles[i - 1]
+
+            zone_low = min(
+                previous.o,
+                previous.c,
+            )
+
+            zone_high = previous.h
+
+            if (
+                zone_high - zone_low
+                < current_atr * 0.10
+            ):
+
+                zone_high = (
+                    zone_low
+                    + current_atr * 0.10
+                )
+
+            level_type = (
+                "Supply"
+                if bullish(previous)
+                else "Bearish OB"
+            )
+
+            strength = 0.0
+
+            if current_body >= 0.70:
+                strength += 10
+            elif current_body >= 0.55:
+                strength += 8
+            else:
+                strength += 6
+
+            if (
+                displacement
+                >= current_atr * 0.75
+            ):
+                strength += 8
+            elif (
+                displacement
+                >= current_atr * 0.50
+            ):
+                strength += 6
+            elif (
+                displacement
+                >= current_atr * 0.30
+            ):
+                strength += 4
+
+            levels.append(
+                {
+                    "direction": direction,
+                    "type": level_type,
+                    "low": zone_low,
+                    "high": zone_high,
+                    "index": i - 1,
+                    "ts": previous.ts,
+                    "strength":
+                        min(strength, 18.0),
+                }
+            )
+
+    # --------------------------------------------------------
+    # Keep strongest recent levels.
+    # --------------------------------------------------------
+
+    levels.sort(
+        key=lambda x: (
+            x["strength"],
+            x["ts"],
+        ),
+        reverse=True,
+    )
+
+    return levels[
+        :MAX_KEY_LEVELS_PER_DIRECTION
+    ]
+
+
+# ============================================================
+# KEY LEVEL PROXIMITY
+# ============================================================
+
+def check_key_level(
+    c4: List[Candle],
+    c15: List[Candle],
+    direction: str,
+) -> Optional[Dict[str, Any]]:
+
+    """
+    Determine whether the CURRENT 15M CLOSED candle
+    is interacting with a meaningful 4H key level.
+
+    Strongest case:
+        Current 15M candle overlaps the zone.
+
+    Secondary case:
+        Price is very close to the zone,
+        measured in 4H ATR.
+    """
+
+    levels = build_key_levels(
+        c4,
+        direction,
+    )
+
+    if not levels:
+        return None
+
+    current = c15[-1]
+
+    current_price = current.c
+
+    current_4h_atr = atr(
+        c4,
+        KEY_LEVEL_ATR_PERIOD,
+    )
+
+    if current_4h_atr is None:
+        return None
+
+    best = None
+
+    for level in levels:
+
+        zone_low = level["low"]
+        zone_high = level["high"]
+
+        # ----------------------------------------------------
+        # Price overlaps the zone.
+        # ----------------------------------------------------
+
+        inside = (
+            current.h >= zone_low
+            and current.l <= zone_high
+        )
+
+        # ----------------------------------------------------
+        # Distance from current price to zone.
+        # ----------------------------------------------------
+
+        if current_price < zone_low:
+
+            distance = (
+                zone_low
+                - current_price
+            )
+
+        elif current_price > zone_high:
+
+            distance = (
+                current_price
+                - zone_high
+            )
+
+        else:
+
+            distance = 0.0
+
+        distance_atr = (
+            distance
+            / current_4h_atr
+        )
+
+        # ----------------------------------------------------
+        # Reject if too far away.
+        # ----------------------------------------------------
+
+        if (
+            not inside
+            and distance_atr
+            > KEY_LEVEL_MAX_DISTANCE_ATR
+        ):
+            continue
+
+        # ----------------------------------------------------
+        # Key Level score: 0 ~ 25
+        # ----------------------------------------------------
+
+        score = 0.0
+
+        # Zone strength: max 15
+        score += min(
+            level["strength"]
+            * (15.0 / 18.0),
+            15.0,
+        )
+
+        # Location / proximity: max 10
+        if inside:
+            score += 10.0
+
+        elif distance_atr <= 0.15:
+            score += 9.0
+
+        elif distance_atr <= 0.30:
+            score += 7.0
+
+        elif distance_atr <= 0.50:
+            score += 5.0
+
+        elif distance_atr <= 0.75:
+            score += 3.0
+
+        score = min(
+            score,
+            25.0,
+        )
+
+        if score < MIN_KEY_LEVEL_SCORE:
+            continue
+
+        candidate = {
+            "type":
+                level["type"],
+
+            "low":
+                zone_low,
+
+            "high":
+                zone_high,
+
+            "ts":
+                level["ts"],
+
+            "strength":
+                level["strength"],
+
+            "inside":
+                inside,
+
+            "distance":
+                distance,
+
+            "distance_atr":
+                distance_atr,
+
+            "score":
+                round(score, 1),
+        }
+
+        if (
+            best is None
+            or candidate["score"]
+            > best["score"]
+        ):
+            best = candidate
+
+    return best
+
+
+# ============================================================
 # 15M SWINGS
 # ============================================================
 
@@ -688,6 +1160,10 @@ def check_current_structure_break(
     if latest_possible_swing < start_index:
         return None
 
+    # --------------------------------------------------------
+    # LONG
+    # --------------------------------------------------------
+
     if direction == "LONG":
 
         if not bullish(current):
@@ -719,14 +1195,24 @@ def check_current_structure_break(
                 continue
 
             return {
-                "index": current_index,
-                "ts": current.ts,
-                "level": level,
+                "index":
+                    current_index,
+
+                "ts":
+                    current.ts,
+
+                "level":
+                    level,
+
                 "swing_ts":
                     candles[
                         swing_index
                     ].ts,
             }
+
+    # --------------------------------------------------------
+    # SHORT
+    # --------------------------------------------------------
 
     else:
 
@@ -759,9 +1245,15 @@ def check_current_structure_break(
                 continue
 
             return {
-                "index": current_index,
-                "ts": current.ts,
-                "level": level,
+                "index":
+                    current_index,
+
+                "ts":
+                    current.ts,
+
+                "level":
+                    level,
+
                 "swing_ts":
                     candles[
                         swing_index
@@ -830,6 +1322,17 @@ def check_box_breakout(
         box_range / current_atr
     )
 
+    # --------------------------------------------------------
+    # Reject extremely large ranges.
+    # --------------------------------------------------------
+
+    if range_atr > MAX_BOX_RANGE_ATR:
+        return None
+
+    # --------------------------------------------------------
+    # LONG
+    # --------------------------------------------------------
+
     if direction == "LONG":
 
         break_distance = (
@@ -847,14 +1350,28 @@ def check_box_breakout(
             return None
 
         return {
-            "box_high": box_high,
-            "box_low": box_low,
-            "box_range": box_range,
-            "range_atr": range_atr,
+            "box_high":
+                box_high,
+
+            "box_low":
+                box_low,
+
+            "box_range":
+                box_range,
+
+            "range_atr":
+                range_atr,
+
             "break_distance":
                 break_distance,
-            "atr": current_atr,
+
+            "atr":
+                current_atr,
         }
+
+    # --------------------------------------------------------
+    # SHORT
+    # --------------------------------------------------------
 
     else:
 
@@ -873,13 +1390,23 @@ def check_box_breakout(
             return None
 
         return {
-            "box_high": box_high,
-            "box_low": box_low,
-            "box_range": box_range,
-            "range_atr": range_atr,
+            "box_high":
+                box_high,
+
+            "box_low":
+                box_low,
+
+            "box_range":
+                box_range,
+
+            "range_atr":
+                range_atr,
+
             "break_distance":
                 break_distance,
-            "atr": current_atr,
+
+            "atr":
+                current_atr,
         }
 
 
@@ -948,18 +1475,18 @@ def score_breakout_distance(
     )
 
     if ratio >= 0.75:
-        return 20.0
+        return 15.0
 
     if ratio >= 0.50:
-        return 16.0
-
-    if ratio >= 0.30:
         return 12.0
 
-    if ratio >= 0.15:
-        return 8.0
+    if ratio >= 0.30:
+        return 9.0
 
-    return 4.0
+    if ratio >= 0.15:
+        return 6.0
+
+    return 3.0
 
 
 def score_candle_quality(
@@ -989,6 +1516,7 @@ def score_candle_quality(
 
     score = 0.0
 
+    # Body quality: max 10
     if ratio >= 0.70:
         score += 10
     elif ratio >= 0.55:
@@ -1000,6 +1528,7 @@ def score_candle_quality(
     else:
         score += 2
 
+    # Close quality: max 5
     if close_position >= 0.80:
         score += 5
     elif close_position >= 0.65:
@@ -1050,6 +1579,7 @@ def score_4h_quality(
         0.0,
     )
 
+    # 4H CISD strength: max 15
     if cisd_body >= 0.70:
         score += 10
     elif cisd_body >= 0.55:
@@ -1059,6 +1589,7 @@ def score_4h_quality(
     elif cisd_body >= 0.30:
         score += 4
 
+    # Recency: max 5
     if recency <= 2:
         score += 5
     elif recency <= 4:
@@ -1068,7 +1599,7 @@ def score_4h_quality(
 
     return min(
         score,
-        15.0,
+        20.0,
     )
 
 
@@ -1081,20 +1612,31 @@ def calculate_signal_score(
     cisd: Dict[str, Any],
     recency: int,
     box: Dict[str, Any],
+    key_level: Dict[str, Any],
 ) -> Dict[str, Any]:
 
-    current = c15[
-        -1
-    ]
+    current = c15[-1]
+
+    # --------------------------------------------------------
+    # 15 points
+    # --------------------------------------------------------
 
     breakout_score = score_breakout_distance(
         box["break_distance"],
         box["atr"],
     )
 
+    # --------------------------------------------------------
+    # 15 points
+    # --------------------------------------------------------
+
     candle_score = score_candle_quality(
         current
     )
+
+    # --------------------------------------------------------
+    # 10 points
+    # --------------------------------------------------------
 
     rvol = relative_volume(
         c15
@@ -1104,24 +1646,54 @@ def calculate_signal_score(
         rvol
     )
 
+    # --------------------------------------------------------
+    # 15 points
+    #
+    # Current structure break is already confirmed
+    # by check_current_structure_break().
+    #
+    # We reserve the full 15 points for a confirmed
+    # structure break.
+    # --------------------------------------------------------
+
     structure_score = 15.0
+
+    # --------------------------------------------------------
+    # 20 points
+    # --------------------------------------------------------
 
     four_hour_score = score_4h_quality(
         cisd,
         recency,
     )
 
+    # --------------------------------------------------------
+    # 25 points
+    # --------------------------------------------------------
+
+    key_level_score = key_level[
+        "score"
+    ]
+
+    # --------------------------------------------------------
+    # TOTAL = 100
+    # --------------------------------------------------------
+
     total = (
-        breakout_score
+        key_level_score
+        + four_hour_score
+        + structure_score
+        + breakout_score
         + candle_score
         + rvol_score
-        + structure_score
-        + four_hour_score
     )
 
     return {
         "score":
             round(total, 1),
+
+        "key_level_score":
+            round(key_level_score, 1),
 
         "breakout_score":
             round(breakout_score, 1),
@@ -1163,6 +1735,10 @@ def analyze_symbol(
         Dict[str, Any]
     ] = []
 
+    # --------------------------------------------------------
+    # 4H
+    # --------------------------------------------------------
+
     try:
 
         c4 = get_candles(
@@ -1178,10 +1754,18 @@ def analyze_symbol(
     if len(c4) < 40:
         return signals
 
+    # --------------------------------------------------------
+    # LONG + SHORT
+    # --------------------------------------------------------
+
     for direction in (
         "LONG",
         "SHORT",
     ):
+
+        # ----------------------------------------------------
+        # 4H SWEEP
+        # ----------------------------------------------------
 
         sweep = find_latest_sweep(
             c4,
@@ -1191,6 +1775,10 @@ def analyze_symbol(
         if not sweep:
             continue
 
+        # ----------------------------------------------------
+        # 4H CISD
+        # ----------------------------------------------------
+
         cisd = find_cisd_after_sweep(
             c4,
             direction,
@@ -1199,6 +1787,10 @@ def analyze_symbol(
 
         if not cisd:
             continue
+
+        # ----------------------------------------------------
+        # 4H RECENCY
+        # ----------------------------------------------------
 
         recency = (
             len(c4)
@@ -1211,6 +1803,10 @@ def analyze_symbol(
             > MAX_4H_RECENCY_BARS
         ):
             continue
+
+        # ----------------------------------------------------
+        # 15M
+        # ----------------------------------------------------
 
         try:
 
@@ -1227,6 +1823,10 @@ def analyze_symbol(
         if len(c15) < 100:
             continue
 
+        # ----------------------------------------------------
+        # First 15M candle AFTER 4H CISD
+        # ----------------------------------------------------
+
         start15 = next(
             (
                 i
@@ -1240,6 +1840,10 @@ def analyze_symbol(
         if start15 >= len(c15):
             continue
 
+        # ----------------------------------------------------
+        # CURRENT CLOSED 15M STRUCTURE BREAK
+        # ----------------------------------------------------
+
         structure = (
             check_current_structure_break(
                 c15,
@@ -1251,6 +1855,25 @@ def analyze_symbol(
         if not structure:
             continue
 
+        # ----------------------------------------------------
+        # KEY LEVEL
+        #
+        # This is the major new filter.
+        # ----------------------------------------------------
+
+        key_level = check_key_level(
+            c4,
+            c15,
+            direction,
+        )
+
+        if not key_level:
+            continue
+
+        # ----------------------------------------------------
+        # BOX BREAKOUT
+        # ----------------------------------------------------
+
         box = check_box_breakout(
             c15,
             direction,
@@ -1259,9 +1882,15 @@ def analyze_symbol(
         if not box:
             continue
 
-        signal_candle = c15[
-            -1
-        ]
+        # ----------------------------------------------------
+        # Current signal candle
+        # ----------------------------------------------------
+
+        signal_candle = c15[-1]
+
+        # ----------------------------------------------------
+        # Defensive closed candle check
+        # ----------------------------------------------------
 
         interval_ms = (
             15
@@ -1280,11 +1909,16 @@ def analyze_symbol(
         ):
             continue
 
+        # ----------------------------------------------------
+        # SCORE
+        # ----------------------------------------------------
+
         score = calculate_signal_score(
             c15,
             cisd,
             recency,
             box,
+            key_level,
         )
 
         if (
@@ -1292,6 +1926,10 @@ def analyze_symbol(
             < MIN_SIGNAL_SCORE
         ):
             continue
+
+        # ----------------------------------------------------
+        # CONFIRMED SIGNAL
+        # ----------------------------------------------------
 
         signals.append(
             {
@@ -1340,33 +1978,41 @@ def analyze_symbol(
                 "atr":
                     box["atr"],
 
+                "key_level_type":
+                    key_level["type"],
+
+                "key_level_low":
+                    key_level["low"],
+
+                "key_level_high":
+                    key_level["high"],
+
+                "key_level_score":
+                    key_level["score"],
+
+                "key_level_inside":
+                    key_level["inside"],
+
+                "key_level_distance_atr":
+                    key_level["distance_atr"],
+
                 "score":
                     score["score"],
 
                 "breakout_score":
-                    score[
-                        "breakout_score"
-                    ],
+                    score["breakout_score"],
 
                 "candle_score":
-                    score[
-                        "candle_score"
-                    ],
+                    score["candle_score"],
 
                 "rvol_score":
-                    score[
-                        "rvol_score"
-                    ],
+                    score["rvol_score"],
 
                 "structure_score":
-                    score[
-                        "structure_score"
-                    ],
+                    score["structure_score"],
 
                 "four_hour_score":
-                    score[
-                        "four_hour_score"
-                    ],
+                    score["four_hour_score"],
 
                 "rvol":
                     score["rvol"],
@@ -1392,15 +2038,6 @@ def fmt_price(
 
     return f"{value:.8f}"
 
-
-# ------------------------------------------------------------
-# 15M CANDLE TIME
-#
-# Bitget candle timestamp = candle OPEN time.
-# Therefore:
-# 23:00 timestamp = 23:00 ~ 23:15 candle
-# Actual close time = 23:15
-# ------------------------------------------------------------
 
 def kst_time(
     ts: int,
@@ -1462,6 +2099,13 @@ def make_message(
         signal["signal_ts"]
     )
 
+    key_location = (
+        "ZONE INSIDE"
+        if signal["key_level_inside"]
+        else
+        f"{signal['key_level_distance_atr']:.2f} ATR"
+    )
+
     return (
         f"{icon} "
         f"{signal['direction']} SIGNAL\n\n"
@@ -1472,9 +2116,17 @@ def make_message(
         f"{signal['score']:.1f}/100\n\n"
 
         f"4H Sweep → CISD → Recency ✅\n"
+        f"4H Key Level ✅\n"
         f"15M Structure Break ✅\n"
         f"15M Closed Candle ✅\n"
         f"Box Breakout ✅\n\n"
+
+        f"📍 KEY LEVEL\n"
+        f"{signal['key_level_type']}\n"
+        f"{fmt_price(signal['key_level_low'])}"
+        f" ~ "
+        f"{fmt_price(signal['key_level_high'])}\n"
+        f"위치: {key_location}\n\n"
 
         f"CISD 시가: "
         f"{fmt_price(signal['cisd_open'])}\n"
@@ -1482,18 +2134,25 @@ def make_message(
         f"신호봉 종가: "
         f"{fmt_price(signal['signal_close'])}\n\n"
 
+        f"점수 구성\n"
+        f"Key Level: "
+        f"{signal['key_level_score']:.1f}/25\n"
+
+        f"4H 품질: "
+        f"{signal['four_hour_score']:.1f}/20\n"
+
+        f"15M 구조: "
+        f"{signal['structure_score']:.1f}/15\n"
+
         f"돌파강도: "
-        f"{signal['breakout_score']:.1f}/20\n"
+        f"{signal['breakout_score']:.1f}/15\n"
 
         f"캔들품질: "
         f"{signal['candle_score']:.1f}/15\n"
 
         f"RVOL: "
         f"{rvol_text} "
-        f"({signal['rvol_score']:.1f}/10)\n"
-
-        f"4H 품질: "
-        f"{signal['four_hour_score']:.1f}/15\n\n"
+        f"({signal['rvol_score']:.1f}/10)\n\n"
 
         f"신호봉: "
         f"{signal_open_time} ~ "
@@ -1665,6 +2324,10 @@ def main() -> None:
     )
 
     print(
+        "4H KEY LEVEL: DEMAND / SUPPLY / OB"
+    )
+
+    print(
         "15M CURRENT CLOSED STRUCTURE BREAK"
     )
 
@@ -1673,11 +2336,16 @@ def main() -> None:
     )
 
     print(
+        "SCORE: 100 POINTS"
+    )
+
+    print(
         f"MIN SCORE: {MIN_SIGNAL_SCORE}"
     )
 
     print(
-        f"MAX SIGNALS: {MAX_TELEGRAM_SIGNALS}"
+        f"MAX SIGNALS: "
+        f"{MAX_TELEGRAM_SIGNALS}"
     )
 
     print(
@@ -1687,6 +2355,10 @@ def main() -> None:
     print(
         "NO ORDERS"
     )
+
+    # --------------------------------------------------------
+    # SYMBOLS
+    # --------------------------------------------------------
 
     try:
 
@@ -1705,6 +2377,10 @@ def main() -> None:
         "[INFO] selected symbols: "
         f"{len(symbols)}"
     )
+
+    # --------------------------------------------------------
+    # SCAN
+    # --------------------------------------------------------
 
     all_signals: List[
         Dict[str, Any]
@@ -1753,6 +2429,10 @@ def main() -> None:
                     f"{done}/{len(symbols)}"
                 )
 
+    # --------------------------------------------------------
+    # SAME-RUN DEDUPLICATION
+    # --------------------------------------------------------
+
     unique = {}
 
     for signal in all_signals:
@@ -1765,9 +2445,14 @@ def main() -> None:
         unique.values()
     )
 
+    # --------------------------------------------------------
+    # RANK
+    # --------------------------------------------------------
+
     all_signals.sort(
         key=lambda x: (
             x["score"],
+            x["key_level_score"],
             x["signal_ts"],
         ),
         reverse=True,
@@ -1775,9 +2460,13 @@ def main() -> None:
 
     print(
         "[INFO] signals after "
-        "box + score filter: "
+        "key level + box + score filter: "
         f"{len(all_signals)}"
     )
+
+    # --------------------------------------------------------
+    # TOP 10
+    # --------------------------------------------------------
 
     ranked_signals = (
         all_signals[
@@ -1790,6 +2479,10 @@ def main() -> None:
         f"{len(ranked_signals)}"
     )
 
+    # --------------------------------------------------------
+    # STATE
+    # --------------------------------------------------------
+
     state = load_state()
 
     sent_keys = set(
@@ -1798,6 +2491,10 @@ def main() -> None:
             [],
         )
     )
+
+    # --------------------------------------------------------
+    # NEW SIGNALS ONLY
+    # --------------------------------------------------------
 
     new_signals = [
         signal
@@ -1810,6 +2507,10 @@ def main() -> None:
         "[INFO] new Telegram signals: "
         f"{len(new_signals)}"
     )
+
+    # --------------------------------------------------------
+    # TELEGRAM
+    # --------------------------------------------------------
 
     for rank, signal in enumerate(
         new_signals,
@@ -1856,6 +2557,10 @@ def main() -> None:
                 "[WARN] "
                 f"Telegram failed: {exc}"
             )
+
+    # --------------------------------------------------------
+    # SAVE STATE
+    # --------------------------------------------------------
 
     save_state(
         state
