@@ -147,6 +147,16 @@ MAX_TELEGRAM_SIGNALS = 10
 
 RVOL_PERIOD = 20
 
+# ============================================================
+# PRE-EXPANSION / FVG / IFVG PATTERN
+# ============================================================
+PATTERN_LOOKBACK_15M = 80
+FVG_MIN_ATR = 0.08
+IFVG_MAX_AGE_BARS = 48
+COMPRESSION_LOOKBACK = 8
+COMPRESSION_MAX_RANGE_ATR = 2.20
+PATTERN_SCORE_MAX = 10.0
+
 
 # ============================================================
 # STATE
@@ -1458,6 +1468,92 @@ def relative_volume(
 
 
 # ============================================================
+# PRE-EXPANSION / FVG / IFVG DETECTION
+# ============================================================
+
+def candle_gap_zone(candles: List[Candle], i: int, direction: str, atr_value: Optional[float]) -> Optional[Dict[str, Any]]:
+    if i < 2 or atr_value is None or atr_value <= 0:
+        return None
+    a = candles[i - 2]
+    c = candles[i]
+    if direction == "LONG":
+        if a.h >= c.l:
+            return None
+        low, high = a.h, c.l
+    else:
+        if a.l <= c.h:
+            return None
+        low, high = c.h, a.l
+    if high - low < atr_value * FVG_MIN_ATR:
+        return None
+    return {"low": low, "high": high, "index": i, "ts": c.ts}
+
+
+def detect_pre_expansion_pattern(candles: List[Candle], direction: str) -> Dict[str, Any]:
+    result = {"score": 0.0, "fvg": False, "ifvg": False, "retest": False, "compression": False, "label": "NONE"}
+    n = len(candles)
+    if n < 20:
+        return result
+    end = n - 1
+    start = max(2, end - PATTERN_LOOKBACK_15M + 1)
+    best = None
+    opposite = "SHORT" if direction == "LONG" else "LONG"
+    for i in range(end - 2, start - 1, -1):
+        atr_i = atr_at(candles, i, ATR_PERIOD)
+        zone = candle_gap_zone(candles, i, opposite, atr_i)
+        if not zone or end - i <= 0 or end - i > IFVG_MAX_AGE_BARS:
+            continue
+        converted_at = None
+        for j in range(i + 1, end + 1):
+            if direction == "LONG" and candles[j].c > zone["high"]:
+                converted_at = j
+                break
+            if direction == "SHORT" and candles[j].c < zone["low"]:
+                converted_at = j
+                break
+        if converted_at is not None:
+            best = (zone, converted_at)
+            break
+    if best is not None:
+        zone, converted_at = best
+        result["fvg"] = True
+        result["ifvg"] = True
+        result["score"] += 5.0
+        for j in range(max(converted_at + 1, end - 5), end + 1):
+            c = candles[j]
+            if c.h < zone["low"] or c.l > zone["high"]:
+                continue
+            if direction == "LONG" and c.c >= zone["high"]:
+                result["retest"] = True
+                result["score"] += 3.0
+                break
+            if direction == "SHORT" and c.c <= zone["low"]:
+                result["retest"] = True
+                result["score"] += 3.0
+                break
+    comp_end = end - 1
+    comp_start = max(0, comp_end - COMPRESSION_LOOKBACK + 1)
+    if comp_start < comp_end:
+        recent = candles[comp_start:comp_end + 1]
+        atr_now = atr_at(candles, end, ATR_PERIOD)
+        if atr_now and recent:
+            rng = max(x.h for x in recent) - min(x.l for x in recent)
+            if rng / atr_now <= COMPRESSION_MAX_RANGE_ATR:
+                result["compression"] = True
+                result["score"] += 2.0
+    result["score"] = min(result["score"], PATTERN_SCORE_MAX)
+    if result["ifvg"] and result["retest"] and result["compression"]:
+        result["label"] = "IFVG RETEST + COMPRESSION"
+    elif result["ifvg"] and result["retest"]:
+        result["label"] = "IFVG RETEST"
+    elif result["ifvg"]:
+        result["label"] = "IFVG"
+    elif result["compression"]:
+        result["label"] = "COMPRESSION"
+    return result
+
+
+# ============================================================
 # SCORE HELPERS
 # ============================================================
 
@@ -1516,54 +1612,47 @@ def score_candle_quality(
 
     score = 0.0
 
-    # Body quality: max 10
+    # Body quality: max 7
     if ratio >= 0.70:
-        score += 10
+        score += 7
     elif ratio >= 0.55:
-        score += 8
-    elif ratio >= 0.40:
         score += 6
+    elif ratio >= 0.40:
+        score += 4
     elif ratio >= 0.30:
-        score += 4
+        score += 3
     else:
-        score += 2
+        score += 1
 
-    # Close quality: max 5
+    # Close quality: max 3
     if close_position >= 0.80:
-        score += 5
+        score += 3
     elif close_position >= 0.65:
-        score += 4
-    elif close_position >= 0.50:
         score += 2
+    elif close_position >= 0.50:
+        score += 1
 
     return min(
         score,
-        15.0,
+        10.0,
     )
 
 
 def score_rvol(
     rvol: Optional[float],
 ) -> float:
-
     if rvol is None:
         return 0.0
-
     if rvol >= 2.0:
-        return 10.0
-
+        return 5.0
     if rvol >= 1.5:
-        return 8.0
-
-    if rvol >= 1.2:
-        return 6.0
-
-    if rvol >= 1.0:
         return 4.0
-
-    if rvol >= 0.8:
+    if rvol >= 1.2:
+        return 3.0
+    if rvol >= 1.0:
         return 2.0
-
+    if rvol >= 0.8:
+        return 1.0
     return 0.0
 
 
@@ -1613,6 +1702,7 @@ def calculate_signal_score(
     recency: int,
     box: Dict[str, Any],
     key_level: Dict[str, Any],
+    pattern: Dict[str, Any],
 ) -> Dict[str, Any]:
 
     current = c15[-1]
@@ -1679,6 +1769,8 @@ def calculate_signal_score(
     # TOTAL = 100
     # --------------------------------------------------------
 
+    pattern_score = min(float(pattern.get("score", 0.0)), PATTERN_SCORE_MAX)
+
     total = (
         key_level_score
         + four_hour_score
@@ -1686,6 +1778,7 @@ def calculate_signal_score(
         + breakout_score
         + candle_score
         + rvol_score
+        + pattern_score
     )
 
     return {
@@ -1703,6 +1796,16 @@ def calculate_signal_score(
 
         "rvol_score":
             round(rvol_score, 1),
+        "pattern_score":
+            round(pattern_score, 1),
+        "pattern_label":
+            pattern.get("label", "NONE"),
+        "pattern_ifvg":
+            bool(pattern.get("ifvg")),
+        "pattern_retest":
+            bool(pattern.get("retest")),
+        "pattern_compression":
+            bool(pattern.get("compression")),
 
         "structure_score":
             round(structure_score, 1),
@@ -1913,12 +2016,18 @@ def analyze_symbol(
         # SCORE
         # ----------------------------------------------------
 
+        pattern = detect_pre_expansion_pattern(
+            c15,
+            direction,
+        )
+
         score = calculate_signal_score(
             c15,
             cisd,
             recency,
             box,
             key_level,
+            pattern,
         )
 
         if (
@@ -2016,6 +2125,16 @@ def analyze_symbol(
 
                 "rvol":
                     score["rvol"],
+                "pattern_score":
+                    score["pattern_score"],
+                "pattern_label":
+                    score["pattern_label"],
+                "pattern_ifvg":
+                    score["pattern_ifvg"],
+                "pattern_retest":
+                    score["pattern_retest"],
+                "pattern_compression":
+                    score["pattern_compression"],
             }
         )
 
@@ -2148,11 +2267,15 @@ def make_message(
         f"{signal['breakout_score']:.1f}/15\n"
 
         f"캔들품질: "
-        f"{signal['candle_score']:.1f}/15\n"
+        f"{signal['candle_score']:.1f}/10\n"
 
         f"RVOL: "
         f"{rvol_text} "
-        f"({signal['rvol_score']:.1f}/10)\n\n"
+        f"({signal['rvol_score']:.1f}/5)\n"
+
+        f"PRE-EXPANSION: "
+        f"{signal['pattern_label']} "
+        f"({signal['pattern_score']:.1f}/10)\n\n"
 
         f"신호봉: "
         f"{signal_open_time} ~ "
