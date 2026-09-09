@@ -1832,11 +1832,22 @@ def calculate_signal_score(
 
 def analyze_symbol(
     symbol: str,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
 
     signals: List[
         Dict[str, Any]
     ] = []
+
+    stats: Dict[str, int] = {
+        "sweep": 0,
+        "cisd": 0,
+        "recency": 0,
+        "structure": 0,
+        "key_level": 0,
+        "box": 0,
+        "closed_candle": 0,
+        "score": 0,
+    }
 
     # --------------------------------------------------------
     # 4H
@@ -1852,10 +1863,10 @@ def analyze_symbol(
 
     except Exception:
 
-        return signals
+        return signals, stats
 
     if len(c4) < 40:
-        return signals
+        return signals, stats
 
     # --------------------------------------------------------
     # LONG + SHORT
@@ -1878,6 +1889,8 @@ def analyze_symbol(
         if not sweep:
             continue
 
+        stats["sweep"] += 1
+
         # ----------------------------------------------------
         # 4H CISD
         # ----------------------------------------------------
@@ -1890,6 +1903,8 @@ def analyze_symbol(
 
         if not cisd:
             continue
+
+        stats["cisd"] += 1
 
         # ----------------------------------------------------
         # 4H RECENCY
@@ -1906,6 +1921,8 @@ def analyze_symbol(
             > MAX_4H_RECENCY_BARS
         ):
             continue
+
+        stats["recency"] += 1
 
         # ----------------------------------------------------
         # 15M
@@ -1958,6 +1975,8 @@ def analyze_symbol(
         if not structure:
             continue
 
+        stats["structure"] += 1
+
         # ----------------------------------------------------
         # KEY LEVEL
         #
@@ -1973,6 +1992,8 @@ def analyze_symbol(
         if not key_level:
             continue
 
+        stats["key_level"] += 1
+
         # ----------------------------------------------------
         # BOX BREAKOUT
         # ----------------------------------------------------
@@ -1984,6 +2005,8 @@ def analyze_symbol(
 
         if not box:
             continue
+
+        stats["box"] += 1
 
         # ----------------------------------------------------
         # Current signal candle
@@ -2012,6 +2035,8 @@ def analyze_symbol(
         ):
             continue
 
+        stats["closed_candle"] += 1
+
         # ----------------------------------------------------
         # SCORE
         # ----------------------------------------------------
@@ -2035,6 +2060,8 @@ def analyze_symbol(
             < MIN_SIGNAL_SCORE
         ):
             continue
+
+        stats["score"] += 1
 
         # ----------------------------------------------------
         # CONFIRMED SIGNAL
@@ -2138,7 +2165,7 @@ def analyze_symbol(
             }
         )
 
-    return signals
+    return signals, stats
 
 
 # ============================================================
@@ -2459,6 +2486,10 @@ def main() -> None:
     )
 
     print(
+        "FILTER DIAGNOSTICS: ENABLED"
+    )
+
+    print(
         "SCORE: 100 POINTS"
     )
 
@@ -2509,6 +2540,17 @@ def main() -> None:
         Dict[str, Any]
     ] = []
 
+    stage_stats: Dict[str, int] = {
+        "sweep": 0,
+        "cisd": 0,
+        "recency": 0,
+        "structure": 0,
+        "key_level": 0,
+        "box": 0,
+        "closed_candle": 0,
+        "score": 0,
+    }
+
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS
     ) as executor:
@@ -2533,9 +2575,14 @@ def main() -> None:
 
                 result = future.result()
 
+                signals, symbol_stats = result
+
                 all_signals.extend(
-                    result
+                    signals
                 )
+
+                for key, value in symbol_stats.items():
+                    stage_stats[key] += value
 
             except Exception as exc:
 
@@ -2579,6 +2626,50 @@ def main() -> None:
             x["signal_ts"],
         ),
         reverse=True,
+    )
+
+    print(
+        "[INFO] FILTER DIAGNOSTICS (LONG + SHORT):"
+    )
+
+    print(
+        "  4H Sweep pass: "
+        f"{stage_stats['sweep']}"
+    )
+
+    print(
+        "  4H CISD pass: "
+        f"{stage_stats['cisd']}"
+    )
+
+    print(
+        "  4H Recency pass: "
+        f"{stage_stats['recency']}"
+    )
+
+    print(
+        "  15M Structure Break pass: "
+        f"{stage_stats['structure']}"
+    )
+
+    print(
+        "  4H Key Level pass: "
+        f"{stage_stats['key_level']}"
+    )
+
+    print(
+        "  15M Box Breakout pass: "
+        f"{stage_stats['box']}"
+    )
+
+    print(
+        "  Closed 15M candle pass: "
+        f"{stage_stats['closed_candle']}"
+    )
+
+    print(
+        "  Score >= MIN pass: "
+        f"{stage_stats['score']}"
     )
 
     print(
