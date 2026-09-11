@@ -43,7 +43,9 @@ IMPORTANT
     * Supply
     * Order Block
 - Maximum 10 signals are sent.
-- Score is exactly 100 points.
+- Score is exactly 100 points before timing refinement.
+- Post-expansion signals are rejected before Telegram.
+- Early-entry timing metrics are displayed for research.
 - No trading orders are placed.
 """
 
@@ -153,8 +155,52 @@ RVOL_PERIOD = 20
 PATTERN_LOOKBACK_15M = 80
 FVG_MIN_ATR = 0.08
 IFVG_MAX_AGE_BARS = 48
+
+# ------------------------------------------------------------
+# EARLY-ENTRY / PRE-EXPANSION FILTER
+#
+# The old scanner could correctly identify structure only AFTER
+# the move had already expanded. These filters are intentionally
+# asymmetric: they do not try to predict the future; they only
+# reject signals where the current candle/preceding move already
+# looks too extended.
+# ------------------------------------------------------------
+
+# Compression is measured on the candles BEFORE the signal candle.
 COMPRESSION_LOOKBACK = 8
 COMPRESSION_MAX_RANGE_ATR = 2.20
+
+# Directional move immediately BEFORE the signal.
+PRE_MOVE_LOOKBACK_FAST = 4
+PRE_MOVE_LOOKBACK_SLOW = 8
+
+# Maximum directional pre-move, measured from close N bars ago
+# to the signal candle close, expressed as a fraction of price.
+# Above the HARD value = reject as late/post-expansion.
+PRE_MOVE_SOFT_PCT = 0.035
+PRE_MOVE_HARD_PCT = 0.060
+
+# Signal candle range/body relative to ATR.
+# A large breakout candle is often the expansion itself, not the
+# beginning of a tradable entry.
+SIGNAL_RANGE_SOFT_ATR = 2.20
+SIGNAL_RANGE_HARD_ATR = 3.50
+SIGNAL_BODY_SOFT_ATR = 1.20
+SIGNAL_BODY_HARD_ATR = 2.20
+
+# Distance of the signal close beyond the 32-bar box.
+# Existing minimum remains 0.10 ATR; these upper limits stop
+# "already far outside the box" signals.
+BREAKOUT_DISTANCE_SOFT_ATR = 0.75
+BREAKOUT_DISTANCE_HARD_ATR = 1.50
+
+# If the price has already traveled this far from the box edge
+# AND the signal candle itself is large, treat it as late.
+LATE_COMBO_DISTANCE_ATR = 0.90
+LATE_COMBO_RANGE_ATR = 2.20
+
+# Early signals get a small quality bonus inside the existing
+# 10-point PRE-EXPANSION bucket. Late signals lose that bucket.
 PATTERN_SCORE_MAX = 10.0
 
 
@@ -1489,69 +1535,556 @@ def candle_gap_zone(candles: List[Candle], i: int, direction: str, atr_value: Op
     return {"low": low, "high": high, "index": i, "ts": c.ts}
 
 
-def detect_pre_expansion_pattern(candles: List[Candle], direction: str) -> Dict[str, Any]:
-    result = {"score": 0.0, "fvg": False, "ifvg": False, "retest": False, "compression": False, "label": "NONE"}
+def detect_pre_expansion_pattern(
+    candles: List[Candle],
+    direction: str,
+) -> Dict[str, Any]:
+
+    result = {
+        "score": 0.0,
+        "fvg": False,
+        "ifvg": False,
+        "retest": False,
+        "compression": False,
+        "compression_ratio": None,
+        "label": "NONE",
+    }
+
     n = len(candles)
+
     if n < 20:
         return result
+
     end = n - 1
-    start = max(2, end - PATTERN_LOOKBACK_15M + 1)
+    start = max(
+        2,
+        end - PATTERN_LOOKBACK_15M + 1,
+    )
+
     best = None
-    opposite = "SHORT" if direction == "LONG" else "LONG"
-    for i in range(end - 2, start - 1, -1):
-        atr_i = atr_at(candles, i, ATR_PERIOD)
-        zone = candle_gap_zone(candles, i, opposite, atr_i)
-        if not zone or end - i <= 0 or end - i > IFVG_MAX_AGE_BARS:
+    opposite = (
+        "SHORT"
+        if direction == "LONG"
+        else "LONG"
+    )
+
+    # --------------------------------------------------------
+    # FVG -> IFVG conversion
+    # --------------------------------------------------------
+
+    for i in range(
+        end - 2,
+        start - 1,
+        -1,
+    ):
+
+        atr_i = atr_at(
+            candles,
+            i,
+            ATR_PERIOD,
+        )
+
+        zone = candle_gap_zone(
+            candles,
+            i,
+            opposite,
+            atr_i,
+        )
+
+        if (
+            not zone
+            or end - i <= 0
+            or end - i > IFVG_MAX_AGE_BARS
+        ):
             continue
+
         converted_at = None
-        for j in range(i + 1, end + 1):
-            if direction == "LONG" and candles[j].c > zone["high"]:
+
+        for j in range(
+            i + 1,
+            end + 1,
+        ):
+
+            if (
+                direction == "LONG"
+                and candles[j].c > zone["high"]
+            ):
                 converted_at = j
                 break
-            if direction == "SHORT" and candles[j].c < zone["low"]:
+
+            if (
+                direction == "SHORT"
+                and candles[j].c < zone["low"]
+            ):
                 converted_at = j
                 break
+
         if converted_at is not None:
-            best = (zone, converted_at)
+            best = (
+                zone,
+                converted_at,
+            )
             break
+
     if best is not None:
+
         zone, converted_at = best
+
         result["fvg"] = True
         result["ifvg"] = True
-        result["score"] += 5.0
-        for j in range(max(converted_at + 1, end - 5), end + 1):
+
+        # IFVG itself = 4 points.
+        # Retest = 3 points.
+        # Compression = up to 3 points.
+        result["score"] += 4.0
+
+        for j in range(
+            max(
+                converted_at + 1,
+                end - 5,
+            ),
+            end + 1,
+        ):
+
             c = candles[j]
-            if c.h < zone["low"] or c.l > zone["high"]:
+
+            if (
+                c.h < zone["low"]
+                or c.l > zone["high"]
+            ):
                 continue
-            if direction == "LONG" and c.c >= zone["high"]:
+
+            if (
+                direction == "LONG"
+                and c.c >= zone["high"]
+            ):
                 result["retest"] = True
                 result["score"] += 3.0
                 break
-            if direction == "SHORT" and c.c <= zone["low"]:
+
+            if (
+                direction == "SHORT"
+                and c.c <= zone["low"]
+            ):
                 result["retest"] = True
                 result["score"] += 3.0
                 break
+
+    # --------------------------------------------------------
+    # Compression BEFORE the signal candle.
+    #
+    # The signal candle itself is deliberately excluded.
+    # This prevents a giant expansion candle from making its
+    # own "compression" condition look better.
+    # --------------------------------------------------------
+
     comp_end = end - 1
-    comp_start = max(0, comp_end - COMPRESSION_LOOKBACK + 1)
+    comp_start = max(
+        0,
+        comp_end - COMPRESSION_LOOKBACK + 1,
+    )
+
     if comp_start < comp_end:
-        recent = candles[comp_start:comp_end + 1]
-        atr_now = atr_at(candles, end, ATR_PERIOD)
+
+        recent = candles[
+            comp_start:comp_end + 1
+        ]
+
+        atr_now = atr_at(
+            candles,
+            end,
+            ATR_PERIOD,
+        )
+
         if atr_now and recent:
-            rng = max(x.h for x in recent) - min(x.l for x in recent)
-            if rng / atr_now <= COMPRESSION_MAX_RANGE_ATR:
+
+            rng = (
+                max(x.h for x in recent)
+                - min(x.l for x in recent)
+            )
+
+            compression_ratio = (
+                rng / atr_now
+            )
+
+            result[
+                "compression_ratio"
+            ] = compression_ratio
+
+            if (
+                compression_ratio
+                <= COMPRESSION_MAX_RANGE_ATR
+            ):
+
                 result["compression"] = True
-                result["score"] += 2.0
-    result["score"] = min(result["score"], PATTERN_SCORE_MAX)
-    if result["ifvg"] and result["retest"] and result["compression"]:
-        result["label"] = "IFVG RETEST + COMPRESSION"
-    elif result["ifvg"] and result["retest"]:
+
+                # Stronger compression receives more of the
+                # available 3 points.
+                if compression_ratio <= 1.00:
+                    result["score"] += 3.0
+                elif compression_ratio <= 1.50:
+                    result["score"] += 2.5
+                else:
+                    result["score"] += 2.0
+
+    result["score"] = min(
+        result["score"],
+        PATTERN_SCORE_MAX,
+    )
+
+    if (
+        result["ifvg"]
+        and result["retest"]
+        and result["compression"]
+    ):
+        result["label"] = (
+            "IFVG RETEST + COMPRESSION"
+        )
+
+    elif (
+        result["ifvg"]
+        and result["retest"]
+    ):
         result["label"] = "IFVG RETEST"
+
     elif result["ifvg"]:
         result["label"] = "IFVG"
+
     elif result["compression"]:
         result["label"] = "COMPRESSION"
+
     return result
 
+
+
+def directional_pre_move(
+    candles: List[Candle],
+    direction: str,
+    lookback: int,
+) -> Optional[float]:
+    """
+    Measures the directional move into the signal candle.
+
+    LONG  -> positive return means price already rose.
+    SHORT -> positive return means price already fell.
+
+    This is intentionally directional rather than absolute so a
+    sideways/choppy market is not treated like a completed move.
+    """
+
+    end = len(candles) - 1
+
+    if end < lookback:
+        return None
+
+    start_price = candles[
+        end - lookback
+    ].c
+
+    end_price = candles[end].c
+
+    if start_price <= 0:
+        return None
+
+    if direction == "LONG":
+        move = (
+            end_price - start_price
+        ) / start_price
+    else:
+        move = (
+            start_price - end_price
+        ) / start_price
+
+    return move
+
+
+def signal_expansion_metrics(
+    candles: List[Candle],
+    direction: str,
+    box: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Calculates the four pieces needed to distinguish an early
+    breakout from a post-expansion breakout.
+
+    No future candles are used.
+    """
+
+    current = candles[-1]
+    current_atr = box.get("atr")
+
+    if not current_atr or current_atr <= 0:
+        return {
+            "pre_move_fast": None,
+            "pre_move_slow": None,
+            "signal_range_atr": None,
+            "signal_body_atr": None,
+            "breakout_distance_atr": None,
+            "early_score": 0.0,
+            "late": False,
+            "post_expansion": False,
+        }
+
+    pre_fast = directional_pre_move(
+        candles,
+        direction,
+        PRE_MOVE_LOOKBACK_FAST,
+    )
+
+    pre_slow = directional_pre_move(
+        candles,
+        direction,
+        PRE_MOVE_LOOKBACK_SLOW,
+    )
+
+    signal_range = (
+        current.h - current.l
+    )
+
+    signal_body = abs(
+        current.c - current.o
+    )
+
+    signal_range_atr = (
+        signal_range / current_atr
+    )
+
+    signal_body_atr = (
+        signal_body / current_atr
+    )
+
+    break_distance = box.get(
+        "break_distance",
+        0.0,
+    )
+
+    breakout_distance_atr = (
+        break_distance / current_atr
+    )
+
+    # --------------------------------------------------------
+    # EARLY QUALITY SCORE: 0~5
+    #
+    # This is not added on top of the old 100 points.
+    # It is used to refine the PRE-EXPANSION bucket.
+    # --------------------------------------------------------
+
+    early_score = 0.0
+
+    if (
+        pre_fast is not None
+        and pre_slow is not None
+    ):
+
+        # Best case: little movement before the signal.
+        if (
+            pre_fast <= 0.012
+            and pre_slow <= 0.020
+        ):
+            early_score += 2.0
+
+        elif (
+            pre_fast <= 0.022
+            and pre_slow <= 0.035
+        ):
+            early_score += 1.0
+
+    if signal_range_atr <= 1.25:
+        early_score += 1.0
+    elif signal_range_atr <= SIGNAL_RANGE_SOFT_ATR:
+        early_score += 0.5
+
+    if signal_body_atr <= 0.80:
+        early_score += 1.0
+    elif signal_body_atr <= SIGNAL_BODY_SOFT_ATR:
+        early_score += 0.5
+
+    if breakout_distance_atr <= 0.35:
+        early_score += 1.0
+    elif breakout_distance_atr <= BREAKOUT_DISTANCE_SOFT_ATR:
+        early_score += 0.5
+
+    early_score = min(
+        early_score,
+        5.0,
+    )
+
+    # --------------------------------------------------------
+    # HARD LATE / POST-EXPANSION CONDITIONS
+    # --------------------------------------------------------
+
+    fast_late = (
+        pre_fast is not None
+        and pre_fast >= PRE_MOVE_HARD_PCT
+    )
+
+    slow_late = (
+        pre_slow is not None
+        and pre_slow >= PRE_MOVE_HARD_PCT
+    )
+
+    giant_signal = (
+        signal_range_atr
+        >= SIGNAL_RANGE_HARD_ATR
+        or signal_body_atr
+        >= SIGNAL_BODY_HARD_ATR
+    )
+
+    far_breakout = (
+        breakout_distance_atr
+        >= BREAKOUT_DISTANCE_HARD_ATR
+    )
+
+    # A combination is also considered late even if no single
+    # variable is extreme.
+    late_combo = (
+        breakout_distance_atr
+        >= LATE_COMBO_DISTANCE_ATR
+        and signal_range_atr
+        >= LATE_COMBO_RANGE_ATR
+    )
+
+    post_expansion = (
+        fast_late
+        or slow_late
+        or giant_signal
+        or far_breakout
+        or late_combo
+    )
+
+    # "late" is softer than "post_expansion".
+    soft_late = (
+        (
+            pre_fast is not None
+            and pre_fast >= PRE_MOVE_SOFT_PCT
+        )
+        or (
+            pre_slow is not None
+            and pre_slow >= PRE_MOVE_SOFT_PCT
+        )
+        or (
+            signal_range_atr
+            >= SIGNAL_RANGE_SOFT_ATR
+        )
+        or (
+            breakout_distance_atr
+            >= BREAKOUT_DISTANCE_SOFT_ATR
+        )
+    )
+
+    return {
+        "pre_move_fast": pre_fast,
+        "pre_move_slow": pre_slow,
+        "signal_range_atr": signal_range_atr,
+        "signal_body_atr": signal_body_atr,
+        "breakout_distance_atr": breakout_distance_atr,
+        "early_score": round(
+            early_score,
+            2,
+        ),
+        "late": bool(soft_late),
+        "post_expansion": bool(post_expansion),
+    }
+
+
+def apply_early_entry_filter(
+    score: Dict[str, Any],
+    timing: Dict[str, Any],
+    pattern: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Refines the existing 100-point score without changing its
+    category maximums.
+
+    The key change is that a high-quality structural signal
+    cannot survive an obvious post-expansion condition.
+    """
+
+    original = float(
+        score["score"]
+    )
+
+    adjusted = original
+
+    early_score = float(
+        timing.get("early_score", 0.0)
+    )
+
+    compression = bool(
+        pattern.get("compression")
+    )
+
+    if timing.get("post_expansion"):
+        # Hard rejection. This is the main fix for PHA-like
+        # signals where the scanner fires after the dump.
+        return {
+            **score,
+            "score": round(
+                max(0.0, adjusted - 20.0),
+                1,
+            ),
+            "timing_status":
+                "POST-EXPANSION",
+            "timing_penalty": 20.0,
+            "early_score": early_score,
+        }
+
+    penalty = 0.0
+
+    if timing.get("late"):
+        penalty += 8.0
+
+    # Lack of compression is not an automatic rejection.
+    # It only matters when the move is already somewhat late.
+    if (
+        timing.get("late")
+        and not compression
+    ):
+        penalty += 4.0
+
+    # Small bonus for genuinely early conditions.
+    # Keep it small so score remains comparable with the old
+    # scanner and does not manufacture false high scores.
+    bonus = 0.0
+
+    if (
+        early_score >= 4.0
+        and compression
+    ):
+        bonus = 3.0
+
+    adjusted = max(
+        0.0,
+        adjusted - penalty + bonus,
+    )
+
+    if (
+        timing.get("late")
+    ):
+        status = "LATE"
+    elif (
+        early_score >= 4.0
+        and compression
+    ):
+        status = "EARLY"
+    elif compression:
+        status = "PRE-EXPANSION"
+    else:
+        status = "BREAKOUT"
+
+    return {
+        **score,
+        "score": round(
+            adjusted,
+            1,
+        ),
+        "timing_status": status,
+        "timing_penalty": round(
+            penalty,
+            1,
+        ),
+        "early_score": early_score,
+    }
 
 # ============================================================
 # SCORE HELPERS
@@ -1703,6 +2236,7 @@ def calculate_signal_score(
     box: Dict[str, Any],
     key_level: Dict[str, Any],
     pattern: Dict[str, Any],
+    timing: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
 
     current = c15[-1]
@@ -1823,6 +2357,27 @@ def calculate_signal_score(
 
         "break_distance":
             box["break_distance"],
+
+        "timing_status":
+            (
+                timing.get("timing_status", "UNSET")
+                if timing
+                else "UNSET"
+            ),
+
+        "timing_penalty":
+            (
+                timing.get("timing_penalty", 0.0)
+                if timing
+                else 0.0
+            ),
+
+        "early_score":
+            (
+                timing.get("early_score", 0.0)
+                if timing
+                else 0.0
+            ),
     }
 
 
@@ -1832,22 +2387,11 @@ def calculate_signal_score(
 
 def analyze_symbol(
     symbol: str,
-) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+) -> List[Dict[str, Any]]:
 
     signals: List[
         Dict[str, Any]
     ] = []
-
-    stats: Dict[str, int] = {
-        "sweep": 0,
-        "cisd": 0,
-        "recency": 0,
-        "structure": 0,
-        "key_level": 0,
-        "box": 0,
-        "closed_candle": 0,
-        "score": 0,
-    }
 
     # --------------------------------------------------------
     # 4H
@@ -1863,10 +2407,10 @@ def analyze_symbol(
 
     except Exception:
 
-        return signals, stats
+        return signals
 
     if len(c4) < 40:
-        return signals, stats
+        return signals
 
     # --------------------------------------------------------
     # LONG + SHORT
@@ -1889,8 +2433,6 @@ def analyze_symbol(
         if not sweep:
             continue
 
-        stats["sweep"] += 1
-
         # ----------------------------------------------------
         # 4H CISD
         # ----------------------------------------------------
@@ -1903,8 +2445,6 @@ def analyze_symbol(
 
         if not cisd:
             continue
-
-        stats["cisd"] += 1
 
         # ----------------------------------------------------
         # 4H RECENCY
@@ -1921,8 +2461,6 @@ def analyze_symbol(
             > MAX_4H_RECENCY_BARS
         ):
             continue
-
-        stats["recency"] += 1
 
         # ----------------------------------------------------
         # 15M
@@ -1975,8 +2513,6 @@ def analyze_symbol(
         if not structure:
             continue
 
-        stats["structure"] += 1
-
         # ----------------------------------------------------
         # KEY LEVEL
         #
@@ -1992,8 +2528,6 @@ def analyze_symbol(
         if not key_level:
             continue
 
-        stats["key_level"] += 1
-
         # ----------------------------------------------------
         # BOX BREAKOUT
         # ----------------------------------------------------
@@ -2005,8 +2539,6 @@ def analyze_symbol(
 
         if not box:
             continue
-
-        stats["box"] += 1
 
         # ----------------------------------------------------
         # Current signal candle
@@ -2035,8 +2567,6 @@ def analyze_symbol(
         ):
             continue
 
-        stats["closed_candle"] += 1
-
         # ----------------------------------------------------
         # SCORE
         # ----------------------------------------------------
@@ -2046,22 +2576,43 @@ def analyze_symbol(
             direction,
         )
 
-        score = calculate_signal_score(
+        timing = signal_expansion_metrics(
+            c15,
+            direction,
+            box,
+        )
+
+        base_score = calculate_signal_score(
             c15,
             cisd,
             recency,
             box,
             key_level,
             pattern,
+            timing,
         )
+
+        score = apply_early_entry_filter(
+            base_score,
+            timing,
+            pattern,
+        )
+
+        # ----------------------------------------------------
+        # EARLY-ENTRY FILTER
+        #
+        # Hard post-expansion setups are rejected before
+        # Telegram. This is the main change in this version.
+        # ----------------------------------------------------
+
+        if timing.get("post_expansion"):
+            continue
 
         if (
             score["score"]
             < MIN_SIGNAL_SCORE
         ):
             continue
-
-        stats["score"] += 1
 
         # ----------------------------------------------------
         # CONFIRMED SIGNAL
@@ -2114,6 +2665,30 @@ def analyze_symbol(
                 "atr":
                     box["atr"],
 
+                "pre_move_fast":
+                    timing["pre_move_fast"],
+
+                "pre_move_slow":
+                    timing["pre_move_slow"],
+
+                "signal_range_atr":
+                    timing["signal_range_atr"],
+
+                "signal_body_atr":
+                    timing["signal_body_atr"],
+
+                "breakout_distance_atr":
+                    timing["breakout_distance_atr"],
+
+                "timing_status":
+                    score["timing_status"],
+
+                "timing_penalty":
+                    score["timing_penalty"],
+
+                "early_score":
+                    score["early_score"],
+
                 "key_level_type":
                     key_level["type"],
 
@@ -2165,7 +2740,7 @@ def analyze_symbol(
             }
         )
 
-    return signals, stats
+    return signals
 
 
 # ============================================================
@@ -2302,7 +2877,17 @@ def make_message(
 
         f"PRE-EXPANSION: "
         f"{signal['pattern_label']} "
-        f"({signal['pattern_score']:.1f}/10)\n\n"
+        f"({signal['pattern_score']:.1f}/10)\n"
+        f"TIMING: "
+        f"{signal['timing_status']} "
+        f"(Early {signal['early_score']:.1f}/5)\n"
+        f"PreMove: "
+        f"{(signal['pre_move_fast'] * 100):.1f}% / "
+        f"{(signal['pre_move_slow'] * 100):.1f}%\n"
+        f"Signal Range: "
+        f"{signal['signal_range_atr']:.2f} ATR\n"
+        f"Breakout: "
+        f"{signal['breakout_distance_atr']:.2f} ATR\n\n"
 
         f"신호봉: "
         f"{signal_open_time} ~ "
@@ -2486,10 +3071,6 @@ def main() -> None:
     )
 
     print(
-        "FILTER DIAGNOSTICS: ENABLED"
-    )
-
-    print(
         "SCORE: 100 POINTS"
     )
 
@@ -2540,17 +3121,6 @@ def main() -> None:
         Dict[str, Any]
     ] = []
 
-    stage_stats: Dict[str, int] = {
-        "sweep": 0,
-        "cisd": 0,
-        "recency": 0,
-        "structure": 0,
-        "key_level": 0,
-        "box": 0,
-        "closed_candle": 0,
-        "score": 0,
-    }
-
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS
     ) as executor:
@@ -2575,14 +3145,9 @@ def main() -> None:
 
                 result = future.result()
 
-                signals, symbol_stats = result
-
                 all_signals.extend(
-                    signals
+                    result
                 )
-
-                for key, value in symbol_stats.items():
-                    stage_stats[key] += value
 
             except Exception as exc:
 
@@ -2626,50 +3191,6 @@ def main() -> None:
             x["signal_ts"],
         ),
         reverse=True,
-    )
-
-    print(
-        "[INFO] FILTER DIAGNOSTICS (LONG + SHORT):"
-    )
-
-    print(
-        "  4H Sweep pass: "
-        f"{stage_stats['sweep']}"
-    )
-
-    print(
-        "  4H CISD pass: "
-        f"{stage_stats['cisd']}"
-    )
-
-    print(
-        "  4H Recency pass: "
-        f"{stage_stats['recency']}"
-    )
-
-    print(
-        "  15M Structure Break pass: "
-        f"{stage_stats['structure']}"
-    )
-
-    print(
-        "  4H Key Level pass: "
-        f"{stage_stats['key_level']}"
-    )
-
-    print(
-        "  15M Box Breakout pass: "
-        f"{stage_stats['box']}"
-    )
-
-    print(
-        "  Closed 15M candle pass: "
-        f"{stage_stats['closed_candle']}"
-    )
-
-    print(
-        "  Score >= MIN pass: "
-        f"{stage_stats['score']}"
     )
 
     print(
