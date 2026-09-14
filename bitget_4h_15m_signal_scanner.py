@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Bitget 4H -> 15M Ranked Signal Scanner
+Bitget 4H -> 15M Ranked Signal Scanner v2.7
 
 FLOW
 ----
@@ -46,6 +46,7 @@ IMPORTANT
 - Score is exactly 100 points before timing refinement.
 - Post-expansion signals are rejected before Telegram.
 - Early-entry timing metrics are displayed for research.
+- HTF MA room is applied as a score penalty.
 - No trading orders are placed.
 """
 
@@ -148,6 +149,30 @@ MIN_SIGNAL_SCORE = 65
 MAX_TELEGRAM_SIGNALS = 10
 
 RVOL_PERIOD = 20
+
+# ============================================================
+# HTF ROOM / OVERHEAD RESISTANCE FILTER
+# ============================================================
+#
+# Prevents a strong 15M breakout from receiving a high score when
+# a major 4H moving-average barrier is immediately overhead (LONG)
+# or underneath (SHORT). This is a SCORE PENALTY, not a hard filter,
+# so genuine HTF breakouts are still allowed to appear.
+#
+# The first version of the early scanner did not price this context
+# into the score. JTOUSDT is a representative example: the 15M
+# breakout was strong, but the 4H MA120 was only a small distance
+# above price.
+# ============================================================
+HTF_MA_PERIODS = (120, 200)
+HTF_ROOM_PENALTY_MAX_ATR = 1.00
+HTF_ROOM_PENALTY_VERY_CLOSE_ATR = 0.20
+HTF_ROOM_PENALTY_CLOSE_ATR = 0.35
+HTF_ROOM_PENALTY_MEDIUM_ATR = 0.50
+HTF_ROOM_PENALTY_WIDE_ATR = 0.75
+
+# Maximum score penalty from HTF room context.
+MAX_HTF_ROOM_PENALTY = 8.0
 
 # ============================================================
 # PRE-EXPANSION / FVG / IFVG PATTERN
@@ -2189,6 +2214,110 @@ def score_rvol(
     return 0.0
 
 
+def simple_moving_average(
+    candles: List[Candle],
+    period: int,
+) -> Optional[float]:
+    """Return the SMA of the latest CLOSED 4H candles."""
+
+    if len(candles) < period:
+        return None
+
+    closes = [
+        candle.c
+        for candle in candles[-period:]
+    ]
+
+    if not closes:
+        return None
+
+    return sum(closes) / len(closes)
+
+
+def htf_room_penalty(
+    c4: List[Candle],
+    current_price: float,
+    direction: str,
+) -> Dict[str, Any]:
+    """
+    Score the amount of room to major 4H moving-average barriers.
+
+    LONG  -> only MAs ABOVE price are considered resistance.
+    SHORT -> only MAs BELOW price are considered support.
+
+    Returns a penalty from 0 to MAX_HTF_ROOM_PENALTY plus the
+    nearest barrier and its distance in 4H ATR.
+    """
+
+    result = {
+        "penalty": 0.0,
+        "nearest_ma_period": None,
+        "nearest_ma": None,
+        "distance_atr": None,
+        "label": "ROOM OK",
+    }
+
+    if current_price <= 0 or len(c4) < max(HTF_MA_PERIODS):
+        return result
+
+    current_atr = atr(
+        c4,
+        KEY_LEVEL_ATR_PERIOD,
+    )
+
+    if not current_atr or current_atr <= 0:
+        return result
+
+    barriers = []
+
+    for period in HTF_MA_PERIODS:
+        ma = simple_moving_average(c4, period)
+        if ma is None:
+            continue
+
+        if direction == "LONG" and ma > current_price:
+            barriers.append((ma - current_price, period, ma))
+        elif direction == "SHORT" and ma < current_price:
+            barriers.append((current_price - ma, period, ma))
+
+    if not barriers:
+        return result
+
+    distance, period, ma = min(
+        barriers,
+        key=lambda x: x[0],
+    )
+
+    distance_atr = distance / current_atr
+
+    if distance_atr <= HTF_ROOM_PENALTY_VERY_CLOSE_ATR:
+        penalty = 8.0
+        label = "VERY CLOSE"
+    elif distance_atr <= HTF_ROOM_PENALTY_CLOSE_ATR:
+        penalty = 6.0
+        label = "CLOSE"
+    elif distance_atr <= HTF_ROOM_PENALTY_MEDIUM_ATR:
+        penalty = 4.0
+        label = "TIGHT"
+    elif distance_atr <= HTF_ROOM_PENALTY_WIDE_ATR:
+        penalty = 2.0
+        label = "MODERATE"
+    elif distance_atr <= HTF_ROOM_PENALTY_MAX_ATR:
+        penalty = 1.0
+        label = "OPENING"
+    else:
+        penalty = 0.0
+        label = "ROOM OK"
+
+    return {
+        "penalty": min(penalty, MAX_HTF_ROOM_PENALTY),
+        "nearest_ma_period": period,
+        "nearest_ma": ma,
+        "distance_atr": distance_atr,
+        "label": label,
+    }
+
+
 def score_4h_quality(
     cisd: Dict[str, Any],
     recency: int,
@@ -2231,6 +2360,8 @@ def score_4h_quality(
 
 def calculate_signal_score(
     c15: List[Candle],
+    c4: List[Candle],
+    direction: str,
     cisd: Dict[str, Any],
     recency: int,
     box: Dict[str, Any],
@@ -2292,6 +2423,21 @@ def calculate_signal_score(
     )
 
     # --------------------------------------------------------
+    # HTF ROOM / MA BARRIER
+    # --------------------------------------------------------
+
+    room = htf_room_penalty(
+        c4,
+        current.c,
+        direction,
+    )
+
+    # This is deliberately a penalty rather than a new score bucket.
+    # It keeps the original 100-point ceiling while making the final
+    # score reflect whether there is usable room after the breakout.
+    htf_room_penalty_value = room["penalty"]
+
+    # --------------------------------------------------------
     # 25 points
     # --------------------------------------------------------
 
@@ -2313,6 +2459,7 @@ def calculate_signal_score(
         + candle_score
         + rvol_score
         + pattern_score
+        - htf_room_penalty_value
     )
 
     return {
@@ -2357,6 +2504,21 @@ def calculate_signal_score(
 
         "break_distance":
             box["break_distance"],
+
+        "htf_room_penalty":
+            round(htf_room_penalty_value, 1),
+        "htf_room_label":
+            room["label"],
+        "htf_room_ma_period":
+            room["nearest_ma_period"],
+        "htf_room_ma":
+            room["nearest_ma"],
+        "htf_room_distance_atr":
+            (
+                round(room["distance_atr"], 2)
+                if room["distance_atr"] is not None
+                else None
+            ),
 
         "timing_status":
             (
@@ -2584,6 +2746,8 @@ def analyze_symbol(
 
         base_score = calculate_signal_score(
             c15,
+            c4,
+            direction,
             cisd,
             recency,
             box,
@@ -2664,6 +2828,21 @@ def analyze_symbol(
 
                 "atr":
                     box["atr"],
+
+                "htf_room_penalty":
+                    score["htf_room_penalty"],
+
+                "htf_room_label":
+                    score["htf_room_label"],
+
+                "htf_room_ma_period":
+                    score["htf_room_ma_period"],
+
+                "htf_room_ma":
+                    score["htf_room_ma"],
+
+                "htf_room_distance_atr":
+                    score["htf_room_distance_atr"],
 
                 "pre_move_fast":
                     timing["pre_move_fast"],
@@ -2827,6 +3006,15 @@ def make_message(
         f"{signal['key_level_distance_atr']:.2f} ATR"
     )
 
+    htf_room_distance = signal.get(
+        "htf_room_distance_atr"
+    )
+    htf_room_distance_text = (
+        f"{htf_room_distance:.2f} ATR"
+        if htf_room_distance is not None
+        else "NO BARRIER"
+    )
+
     return (
         f"{icon} "
         f"{signal['direction']} SIGNAL\n\n"
@@ -2861,6 +3049,13 @@ def make_message(
 
         f"4H 품질: "
         f"{signal['four_hour_score']:.1f}/20\n"
+
+        f"HTF ROOM: "
+        f"-{signal['htf_room_penalty']:.1f} "
+        f"({signal['htf_room_label']}"
+        f" / "
+        f"{htf_room_distance_text}"
+        f")\n"
 
         f"15M 구조: "
         f"{signal['structure_score']:.1f}/15\n"
