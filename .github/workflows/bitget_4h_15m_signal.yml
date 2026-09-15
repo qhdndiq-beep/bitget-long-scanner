@@ -8,6 +8,11 @@ on:
     # Korea time: 18:03, 18:18, 18:33, 18:48 ...
     - cron: "3,18,33,48 * * * *"
 
+# Prevent overlapping runs from modifying tracking files at the same time.
+concurrency:
+  group: bitget-4h15m-signal-scanner
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
