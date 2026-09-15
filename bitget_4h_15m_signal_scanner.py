@@ -234,6 +234,8 @@ PATTERN_SCORE_MAX = 10.0
 # ============================================================
 
 STATE_FILE = "signal_state.json"
+SNAPSHOT_FILE = "signal_snapshots.json"
+SNAPSHOT_KEEP = 1000
 
 
 # ============================================================
@@ -3231,6 +3233,93 @@ def signal_key(
     )
 
 
+def load_snapshots() -> List[Dict[str, Any]]:
+
+    if not os.path.exists(
+        SNAPSHOT_FILE
+    ):
+        return []
+
+    try:
+        with open(
+            SNAPSHOT_FILE,
+            "r",
+            encoding="utf-8",
+        ) as f:
+            data = json.load(f)
+
+        if isinstance(data, dict) and isinstance(data.get("snapshots"), list):
+            return data["snapshots"]
+
+        if isinstance(data, list):
+            return data
+
+    except Exception:
+        pass
+
+    return []
+
+
+def save_signal_snapshots(
+    signals: List[Dict[str, Any]],
+) -> None:
+    """Persist immutable research snapshots before Telegram delivery."""
+
+    if not signals:
+        return
+
+    existing = load_snapshots()
+    by_key: Dict[str, Dict[str, Any]] = {}
+
+    for item in existing:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("signal_id")
+        if key:
+            by_key[str(key)] = item
+
+    captured_at = int(time.time() * 1000)
+
+    for signal in signals:
+        key = signal_key(signal)
+        if key in by_key:
+            continue
+
+        by_key[key] = {
+            "schema_version": 1,
+            "signal_id": key,
+            "captured_at": captured_at,
+            "scanner_version": "2.7",
+            "signal": dict(signal),
+        }
+
+    snapshots = sorted(
+        by_key.values(),
+        key=lambda x: int(
+            x.get("signal", {}).get("signal_ts", 0)
+        ),
+        reverse=True,
+    )[:SNAPSHOT_KEEP]
+
+    tmp = f"{SNAPSHOT_FILE}.tmp"
+    with open(
+        tmp,
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(
+            {
+                "schema_version": 1,
+                "snapshots": snapshots,
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    os.replace(tmp, SNAPSHOT_FILE)
+
+
 # ============================================================
 # MAIN
 # ============================================================
@@ -3437,6 +3526,13 @@ def main() -> None:
         "[INFO] new Telegram signals: "
         f"{len(new_signals)}"
     )
+
+    # --------------------------------------------------------
+    # RESEARCH SNAPSHOT
+    # --------------------------------------------------------
+    # Save before Telegram so a delivery failure never loses the
+    # confirmed signal from the research dataset.
+    save_signal_snapshots(new_signals)
 
     # --------------------------------------------------------
     # TELEGRAM
