@@ -5,7 +5,7 @@ on:
 
   schedule:
     # GitHub Actions cron is UTC.
-    # Korea time: 18:03, 18:18, 18:33, 18:48, ...
+    # Korea time: 18:03, 18:18, 18:33, 18:48 ...
     - cron: "3,18,33,48 * * * *"
 
 jobs:
@@ -26,7 +26,26 @@ jobs:
 
       - name: Run signal scanner
         env:
-          TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_4H15M_BOT_TOKEN }}
-          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_4H15M_CHAT_ID }}
+          TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_SIGNAL_BOT_TOKEN }}
+          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_SIGNAL_CHAT_ID }}
         run: |
           python bitget_4h_15m_signal_scanner.py
+
+      - name: Run post-signal tracker
+        run: |
+          python post_signal_tracker.py
+
+      - name: Commit tracking state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add signal_state.json signal_snapshots.json post_signal_tracker.json
+
+          if git diff --cached --quiet; then
+            echo "No tracking changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update signal tracking state"
+          git push
