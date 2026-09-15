@@ -26,8 +26,8 @@ jobs:
 
       - name: Run signal scanner
         env:
-          TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_SIGNAL_BOT_TOKEN }}
-          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_SIGNAL_CHAT_ID }}
+          TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python bitget_4h_15m_signal_scanner.py
 
