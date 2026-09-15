@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -48,4 +50,7 @@ jobs:
           fi
 
           git commit -m "Update signal tracking state"
+
+          git pull --rebase origin main
+
           git push
