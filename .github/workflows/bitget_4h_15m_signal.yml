@@ -47,9 +47,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "Fetching latest main before committing tracking state..."
-          git fetch origin main
-          git rebase origin/main
+          echo "Staging tracking state changes..."
 
           git add signal_state.json signal_snapshots.json post_signal_tracker.json
 
