@@ -1,0 +1,41 @@
+
+name: Bitget PRE-LONG Watch v1
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # GitHub Actions cron is UTC.
+    # Korea time: 18:06, 18:21, 18:36, 18:51 ...
+    - cron: "6,21,36,51 * * * *"
+
+concurrency:
+  group: bitget-pre-long-watch-v1
+  cancel-in-progress: true
+
+jobs:
+  pre-long:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run PRE-LONG watcher
+        env:
+          TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_4H15M_BOT_TOKEN }}
+          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_4H15M_CHAT_ID }}
+        run: |
+          python pre_long_scanner_v1.py
+
+      - name: Upload PRE-LONG research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-long-report-${{ github.run_number }}
+          path: pre_long_candidates.json
+          retention-days: 30
