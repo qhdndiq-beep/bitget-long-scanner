@@ -1,5 +1,4 @@
-
-name: Bitget PRE-LONG Watch v1
+name: Bitget PRE-LONG Watch v1.1
 
 on:
   workflow_dispatch:
@@ -31,7 +30,7 @@ jobs:
           TELEGRAM_SIGNAL_BOT_TOKEN: ${{ secrets.TELEGRAM_4H15M_BOT_TOKEN }}
           TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_4H15M_CHAT_ID }}
         run: |
-          python pre_long_scanner_v1.py
+          python pre_long_scanner_v1_1.py
 
       - name: Upload PRE-LONG research report
         uses: actions/upload-artifact@v4
