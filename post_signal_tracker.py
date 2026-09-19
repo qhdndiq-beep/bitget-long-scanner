@@ -471,8 +471,29 @@ def main() -> None:
         save_json(TRACKER_FILE, tracker)
         return
 
-    # One market-data request per symbol, not per signal.
-    symbols = sorted({s["signal"]["symbol"] for s in snapshots if isinstance(s, dict) and "signal" in s})
+    # Only track signals that are still inside the 24h research horizon.
+    # Completed/expired snapshots remain available for research, but they must
+    # not trigger fresh Bitget API requests on every tracker run.
+    now_ms = int(time.time() * 1000)
+    active_snapshots: List[Dict[str, Any]] = []
+    for snapshot in active_snapshots:
+        if not isinstance(snapshot, dict) or "signal" not in snapshot:
+            continue
+        signal = snapshot["signal"]
+        try:
+            signal_ts = int(signal["signal_ts"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if signal_ts + TRACKING_HOURS * 60 * 60 * 1000 >= now_ms:
+            active_snapshots.append(snapshot)
+
+    # One market-data request per ACTIVE symbol, not per signal and not per
+    # historical snapshot. This is the main performance optimization.
+    symbols = sorted({
+        s["signal"]["symbol"]
+        for s in active_snapshots
+        if isinstance(s, dict) and "signal" in s
+    })
     candles_by_symbol: Dict[str, List[Candle]] = {}
     for symbol in symbols:
         try:
