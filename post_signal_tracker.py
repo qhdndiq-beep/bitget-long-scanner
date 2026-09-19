@@ -476,7 +476,7 @@ def main() -> None:
     # not trigger fresh Bitget API requests on every tracker run.
     now_ms = int(time.time() * 1000)
     active_snapshots: List[Dict[str, Any]] = []
-    for snapshot in active_snapshots:
+    for snapshot in snapshots:
         if not isinstance(snapshot, dict) or "signal" not in snapshot:
             continue
         signal = snapshot["signal"]
