@@ -1,0 +1,57 @@
+name: Bitget Post-Signal Tracker
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # GitHub Actions cron is UTC.
+    # KST: 18:10, 18:25, 18:40, 18:55 ...
+    - cron: "10,25,40,55 * * * *"
+
+# Serialize all tracker runs. This workflow is the only workflow that pushes
+# post-signal tracking state to main.
+concurrency:
+  group: bitget-state-writer
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run post-signal tracker
+        run: |
+          python post_signal_tracker.py
+
+      - name: Commit tracking state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add post_signal_tracker.json
+
+          if git diff --cached --quiet; then
+            echo "No tracker changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update post-signal tracking state"
+
+          # Refresh remote immediately before push. This handles a normal
+          # main-branch update without overwriting another commit.
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
