@@ -8,9 +8,10 @@ on:
     # Korea time: 18:03, 18:18, 18:33, 18:48 ...
     - cron: "3,18,33,48 * * * *"
 
-# Prevent overlapping runs from modifying tracking files at the same time.
+# Prevent overlapping scanner runs. Tracker is intentionally separated into
+# its own workflow so this scan can finish quickly after Telegram/snapshot save.
 concurrency:
-  group: bitget-4h15m-signal-scanner
+  group: bitget-state-writer
   cancel-in-progress: false
 
 jobs:
@@ -38,25 +39,23 @@ jobs:
         run: |
           python bitget_4h_15m_signal_scanner.py
 
-      - name: Run post-signal tracker
-        run: |
-          python post_signal_tracker.py
-
-      - name: Commit tracking state
+      - name: Commit scanner state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          echo "Staging tracking state changes..."
-
-          git add signal_state.json signal_snapshots.json post_signal_tracker.json
+          git add signal_state.json signal_snapshots.json
 
           if git diff --cached --quiet; then
-            echo "No tracking changes to commit."
+            echo "No scanner state changes to commit."
             exit 0
           fi
 
-          git commit -m "Update signal tracking state"
+          git commit -m "Update signal scanner state"
 
-          echo "Pushing tracking state..."
+          # Rebase onto the latest main before pushing. The scanner and tracker
+          # are serialized by their own workflow groups, so this is only a
+          # safety refresh for a commit that landed while the scan was running.
+          git fetch origin main
+          git rebase origin/main
           git push origin HEAD:main
