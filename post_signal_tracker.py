@@ -51,8 +51,7 @@ TRACKER_FILE = "post_signal_tracker.json"
 REQUEST_TIMEOUT = 12
 REQUEST_RETRIES = 3
 
-# Bitget v2 history-candles API maximum.
-# Do not increase above 200.
+# Bitget v2 history-candles API maximum is 200.
 HISTORY_LIMIT_15M = 200
 MAX_HISTORY_CANDLES = 200
 
@@ -90,13 +89,10 @@ REVERSAL_CONSECUTIVE_BARS = 2
 # Bitget HTTP helper
 # ============================================================
 
-def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    GET JSON from Bitget with retry handling.
-
-    Any Bitget API error is converted into RuntimeError so the caller
-    can handle the failure per symbol without killing the entire tracker.
-    """
+def get_json(
+    path: str,
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
 
     query = urlencode(params)
     url = f"{BASE_URL}{path}?{query}"
@@ -104,7 +100,9 @@ def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
     last_err: Optional[Exception] = None
 
     for attempt in range(REQUEST_RETRIES):
+
         try:
+
             req = Request(
                 url,
                 headers={
@@ -114,13 +112,21 @@ def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
                 method="GET",
             )
 
-            with urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            with urlopen(
+                req,
+                timeout=REQUEST_TIMEOUT,
+            ) as resp:
+
+                data = json.loads(
+                    resp.read().decode("utf-8")
+                )
 
             if data.get("code") != "00000":
+
                 raise RuntimeError(
                     f"Bitget API error: "
-                    f"{data.get('code')} {data.get('msg')}"
+                    f"{data.get('code')} "
+                    f"{data.get('msg')}"
                 )
 
             return data
@@ -132,13 +138,16 @@ def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
             json.JSONDecodeError,
             RuntimeError,
         ) as exc:
+
             last_err = exc
 
-            # Retry with a small progressive delay.
-            time.sleep(0.7 * (attempt + 1))
+            time.sleep(
+                0.7 * (attempt + 1)
+            )
 
     raise RuntimeError(
-        f"Request failed: {path} {params} :: {last_err}"
+        f"Request failed: "
+        f"{path} {params} :: {last_err}"
     )
 
 
@@ -147,7 +156,15 @@ def get_json(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================
 
 class Candle:
-    __slots__ = ("ts", "o", "h", "l", "c", "v")
+
+    __slots__ = (
+        "ts",
+        "o",
+        "h",
+        "l",
+        "c",
+        "v",
+    )
 
     def __init__(
         self,
@@ -158,6 +175,7 @@ class Candle:
         c: float,
         v: float,
     ):
+
         self.ts = ts
         self.o = o
         self.h = h
@@ -177,20 +195,28 @@ def get_candles(
     """
     Fetch 15M historical candles for one symbol.
 
-    Important:
     Bitget v2 history-candles has a maximum limit of 200.
-    The requested value is therefore clamped to 1..200 so that
-    accidental future changes can never generate an invalid request.
+    The requested value is therefore clamped to 1..200.
     """
 
     try:
+
         requested_limit = int(limit)
-    except (TypeError, ValueError):
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
         requested_limit = HISTORY_LIMIT_15M
 
+    # Never allow an invalid Bitget request above 200.
     safe_limit = max(
         1,
-        min(requested_limit, MAX_HISTORY_CANDLES),
+        min(
+            requested_limit,
+            MAX_HISTORY_CANDLES,
+        ),
     )
 
     data = get_json(
@@ -205,11 +231,16 @@ def get_candles(
 
     candles: List[Candle] = []
 
-    for row in data.get("data", []):
+    for row in data.get(
+        "data",
+        [],
+    ):
+
         if len(row) < 6:
             continue
 
         try:
+
             candles.append(
                 Candle(
                     int(row[0]),
@@ -220,22 +251,32 @@ def get_candles(
                     float(row[5]),
                 )
             )
-        except (TypeError, ValueError):
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
             continue
 
-    candles.sort(key=lambda x: x.ts)
+    candles.sort(
+        key=lambda x: x.ts
+    )
 
     # Only CLOSED candles are allowed.
-    now_ms = int(time.time() * 1000)
-    interval_ms = 15 * 60 * 1000
+    now_ms = int(
+        time.time() * 1000
+    )
 
-    closed_candles = [
+    interval_ms = (
+        15 * 60 * 1000
+    )
+
+    return [
         c
         for c in candles
         if c.ts + interval_ms <= now_ms
     ]
-
-    return closed_candles
 
 
 # ============================================================
@@ -246,44 +287,61 @@ def sma(
     values: List[float],
     period: int,
 ) -> Optional[float]:
+
     if len(values) < period:
         return None
 
-    return sum(values[-period:]) / period
+    return sum(
+        values[-period:]
+    ) / period
 
 
 def atr(
     candles: List[Candle],
     period: int = 14,
 ) -> Optional[float]:
+
     if len(candles) < period + 1:
         return None
 
     trs: List[float] = []
 
-    for i in range(1, len(candles)):
+    for i in range(
+        1,
+        len(candles),
+    ):
+
         cur = candles[i]
         prev = candles[i - 1]
 
         trs.append(
             max(
                 cur.h - cur.l,
-                abs(cur.h - prev.c),
-                abs(cur.l - prev.c),
+                abs(
+                    cur.h - prev.c
+                ),
+                abs(
+                    cur.l - prev.c
+                ),
             )
         )
 
     if len(trs) < period:
         return None
 
-    return sum(trs[-period:]) / period
+    return sum(
+        trs[-period:]
+    ) / period
 
 
 # ============================================================
 # Utility functions
 # ============================================================
 
-def iso_utc(ts_ms: int) -> str:
+def iso_utc(
+    ts_ms: int,
+) -> str:
+
     return datetime.fromtimestamp(
         ts_ms / 1000,
         tz=timezone.utc,
@@ -294,15 +352,19 @@ def pct_change(
     price: float,
     base: float,
 ) -> float:
+
     if base == 0:
         return 0.0
 
-    return (price / base - 1.0) * 100.0
+    return (
+        price / base - 1.0
+    ) * 100.0
 
 
 def signal_id(
     signal: Dict[str, Any],
 ) -> str:
+
     return (
         f"{signal['symbol']}:"
         f"{signal['direction']}:"
@@ -318,18 +380,22 @@ def load_json(
     path: str,
     default: Any,
 ) -> Any:
+
     if not os.path.exists(path):
         return default
 
     try:
+
         with open(
             path,
             "r",
             encoding="utf-8",
         ) as f:
+
             return json.load(f)
 
     except Exception:
+
         return default
 
 
@@ -337,6 +403,7 @@ def save_json(
     path: str,
     data: Any,
 ) -> None:
+
     tmp = f"{path}.tmp"
 
     with open(
@@ -344,6 +411,7 @@ def save_json(
         "w",
         encoding="utf-8",
     ) as f:
+
         json.dump(
             data,
             f,
@@ -351,28 +419,51 @@ def save_json(
             indent=2,
         )
 
-    os.replace(tmp, path)
+    os.replace(
+        tmp,
+        path,
+    )
 
 
 def load_snapshots() -> List[Dict[str, Any]]:
+
     data = load_json(
         SNAPSHOT_FILE,
         [],
     )
 
-    if isinstance(data, dict):
-        data = data.get("snapshots", [])
+    if isinstance(
+        data,
+        dict,
+    ):
 
-    return data if isinstance(data, list) else []
+        data = data.get(
+            "snapshots",
+            [],
+        )
+
+    return (
+        data
+        if isinstance(
+            data,
+            list,
+        )
+        else []
+    )
 
 
 def load_tracker() -> Dict[str, Any]:
+
     data = load_json(
         TRACKER_FILE,
         None,
     )
 
-    if not isinstance(data, dict):
+    if not isinstance(
+        data,
+        dict,
+    ):
+
         data = {}
 
     data.setdefault(
@@ -398,11 +489,18 @@ def checkpoint_for_signal(
 ) -> Optional[Dict[str, Any]]:
 
     signal = snapshot["signal"]
+
     sid = snapshot["signal_id"]
 
     direction = signal["direction"]
-    entry = float(signal["signal_close"])
-    signal_ts = int(signal["signal_ts"])
+
+    entry = float(
+        signal["signal_close"]
+    )
+
+    signal_ts = int(
+        signal["signal_ts"]
+    )
 
     structure_level = float(
         signal.get(
@@ -422,15 +520,20 @@ def checkpoint_for_signal(
 
     tracked_until = (
         signal_ts
-        + TRACKING_HOURS * 60 * 60 * 1000
+        + TRACKING_HOURS
+        * 60
+        * 60
+        * 1000
     )
 
-    # Only candles AFTER the signal candle and
-    # inside the fixed 24h research horizon.
     after = [
         c
         for c in candles
-        if signal_ts < c.ts <= tracked_until
+        if (
+            signal_ts
+            < c.ts
+            <= tracked_until
+        )
     ]
 
     if not after:
@@ -463,12 +566,15 @@ def checkpoint_for_signal(
         14,
     )
 
-    # Use scanner signal ATR as primary normalization basis.
+    # Use scanner signal ATR as the primary normalization basis.
     # If missing/invalid, fall back to current 15M ATR.
     norm_atr = (
         base_atr
         if base_atr > 0
-        else (current_atr or 0.0)
+        else (
+            current_atr
+            or 0.0
+        )
     )
 
     favorable_price = max(
@@ -503,16 +609,19 @@ def checkpoint_for_signal(
         )
 
         favorable_excursion = (
-            favorable_price - entry
+            favorable_price
+            - entry
         )
 
         adverse_excursion = (
-            entry - adverse_price
+            entry
+            - adverse_price
         )
 
         structure_reclaimed = (
             structure_level > 0
-            and latest.c > structure_level
+            and latest.c
+            > structure_level
         )
 
         ma200_reclaimed = (
@@ -543,16 +652,19 @@ def checkpoint_for_signal(
         )
 
         favorable_excursion = (
-            entry - adverse_price
+            entry
+            - adverse_price
         )
 
         adverse_excursion = (
-            favorable_price - entry
+            favorable_price
+            - entry
         )
 
         structure_reclaimed = (
             structure_level > 0
-            and latest.c < structure_level
+            and latest.c
+            < structure_level
         )
 
         ma200_reclaimed = (
@@ -566,13 +678,15 @@ def checkpoint_for_signal(
         )
 
     mfe_atr = (
-        favorable_excursion / norm_atr
+        favorable_excursion
+        / norm_atr
         if norm_atr > 0
         else None
     )
 
     mae_atr = (
-        adverse_excursion / norm_atr
+        adverse_excursion
+        / norm_atr
         if norm_atr > 0
         else None
     )
@@ -585,7 +699,8 @@ def checkpoint_for_signal(
 
         opposite_structure_reclaim = (
             structure_level > 0
-            and latest.c > structure_level
+            and latest.c
+            > structure_level
         )
 
         opposite_ma200_reclaim = (
@@ -601,7 +716,8 @@ def checkpoint_for_signal(
 
         opposite_structure_reclaim = (
             structure_level > 0
-            and latest.c < structure_level
+            and latest.c
+            < structure_level
         )
 
         opposite_ma200_reclaim = (
@@ -665,7 +781,9 @@ def checkpoint_for_signal(
         >= REVERSAL_CONSECUTIVE_BARS
     )
 
-    reversal_watch = reversal_condition
+    reversal_watch = (
+        reversal_condition
+    )
 
     # ========================================================
     # Checkpoint
@@ -674,7 +792,9 @@ def checkpoint_for_signal(
     return {
         "signal_id": sid,
         "ts": latest.ts,
-        "time": iso_utc(latest.ts),
+        "time": iso_utc(
+            latest.ts
+        ),
         "close": latest.c,
         "high": latest.h,
         "low": latest.l,
@@ -695,36 +815,53 @@ def checkpoint_for_signal(
         ),
 
         "mfe_atr": (
-            round(mfe_atr, 4)
+            round(
+                mfe_atr,
+                4,
+            )
             if mfe_atr is not None
             else None
         ),
 
         "mae_atr": (
-            round(mae_atr, 4)
+            round(
+                mae_atr,
+                4,
+            )
             if mae_atr is not None
             else None
         ),
 
         "ma120": (
-            round(ma120, 10)
+            round(
+                ma120,
+                10,
+            )
             if ma120 is not None
             else None
         ),
 
         "ma200": (
-            round(ma200, 10)
+            round(
+                ma200,
+                10,
+            )
             if ma200 is not None
             else None
         ),
 
         "atr14": (
-            round(current_atr, 10)
+            round(
+                current_atr,
+                10,
+            )
             if current_atr is not None
             else None
         ),
 
-        "structure_level": structure_level,
+        "structure_level": (
+            structure_level
+        ),
 
         "structure_reclaimed": bool(
             opposite_structure_reclaim
@@ -759,7 +896,9 @@ def checkpoint_for_signal(
             reversal_confirmed
         ),
 
-        "reversal_consecutive_bars": consecutive,
+        "reversal_consecutive_bars": (
+            consecutive
+        ),
     }
 
 
@@ -773,6 +912,7 @@ def update_signal_record(
 ) -> bool:
 
     snapshot = record["snapshot"]
+
     signal = snapshot["signal"]
 
     sid = record["signal_id"]
@@ -820,7 +960,10 @@ def update_signal_record(
 
     tracked_until = (
         signal_ts
-        + TRACKING_HOURS * 60 * 60 * 1000
+        + TRACKING_HOURS
+        * 60
+        * 60
+        * 1000
     )
 
     eligible = [
@@ -858,7 +1001,9 @@ def update_signal_record(
 
     checkpoints = [
         existing_by_ts[k]
-        for k in sorted(existing_by_ts)
+        for k in sorted(
+            existing_by_ts
+        )
     ]
 
     record["checkpoints"] = (
@@ -866,8 +1011,7 @@ def update_signal_record(
     )
 
     # ========================================================
-    # Recalculate MFE / MAE over full currently available
-    # tracking horizon.
+    # Recalculate MFE / MAE
     # ========================================================
 
     favorable_high = max(
@@ -886,11 +1030,13 @@ def update_signal_record(
         mae_price = favorable_low
 
         mfe_move = (
-            mfe_price - entry
+            mfe_price
+            - entry
         )
 
         mae_move = (
-            entry - mae_price
+            entry
+            - mae_price
         )
 
     else:
@@ -899,33 +1045,51 @@ def update_signal_record(
         mae_price = favorable_high
 
         mfe_move = (
-            entry - mfe_price
+            entry
+            - mfe_price
         )
 
         mae_move = (
-            mae_price - entry
+            mae_price
+            - entry
         )
 
     record["metrics"] = {
-        "entry": entry,
-        "latest_close": eligible[-1].c,
 
-        "mfe_price": mfe_price,
-        "mae_price": mae_price,
+        "entry": entry,
+
+        "latest_close": (
+            eligible[-1].c
+        ),
+
+        "mfe_price": (
+            mfe_price
+        ),
+
+        "mae_price": (
+            mae_price
+        ),
 
         "mfe_pct": round(
-            (mfe_move / entry) * 100.0,
+            (
+                mfe_move
+                / entry
+            ) * 100.0,
             4,
         ),
 
         "mae_pct": round(
-            (mae_move / entry) * 100.0,
+            (
+                mae_move
+                / entry
+            ) * 100.0,
             4,
         ),
 
         "mfe_atr": (
             round(
-                mfe_move / norm_atr,
+                mfe_move
+                / norm_atr,
                 4,
             )
             if norm_atr > 0
@@ -934,7 +1098,8 @@ def update_signal_record(
 
         "mae_atr": (
             round(
-                mae_move / norm_atr,
+                mae_move
+                / norm_atr,
                 4,
             )
             if norm_atr > 0
@@ -942,34 +1107,39 @@ def update_signal_record(
         ),
     }
 
-    # ========================================================
-    # Events
-    # ========================================================
-
     events = record.setdefault(
         "events",
         {},
     )
+
+    # ========================================================
+    # Favorable threshold helper
+    # ========================================================
 
     def favorable_threshold(
         threshold: float,
     ) -> bool:
 
         return (
-            (mfe_move / norm_atr) >= threshold
+            (
+                mfe_move
+                / norm_atr
+            ) >= threshold
             if norm_atr > 0
             else False
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # +1 ATR
-    # --------------------------------------------------------
+    # ========================================================
 
     if (
         favorable_threshold(
             FAVORABLE_1_ATR
         )
-        and "favorable_1atr_ts" not in events
+        and
+        "favorable_1atr_ts"
+        not in events
     ):
 
         for c in eligible:
@@ -982,7 +1152,8 @@ def update_signal_record(
 
             if (
                 norm_atr > 0
-                and move / norm_atr
+                and
+                move / norm_atr
                 >= FAVORABLE_1_ATR
             ):
 
@@ -992,15 +1163,17 @@ def update_signal_record(
 
                 break
 
-    # --------------------------------------------------------
+    # ========================================================
     # +1.5 ATR
-    # --------------------------------------------------------
+    # ========================================================
 
     if (
         favorable_threshold(
             FAVORABLE_1_5_ATR
         )
-        and "favorable_1_5atr_ts" not in events
+        and
+        "favorable_1_5atr_ts"
+        not in events
     ):
 
         for c in eligible:
@@ -1013,7 +1186,8 @@ def update_signal_record(
 
             if (
                 norm_atr > 0
-                and move / norm_atr
+                and
+                move / norm_atr
                 >= FAVORABLE_1_5_ATR
             ):
 
@@ -1023,16 +1197,20 @@ def update_signal_record(
 
                 break
 
-    # --------------------------------------------------------
+    # ========================================================
     # -1 ATR
-    # --------------------------------------------------------
+    # ========================================================
 
     if (
         norm_atr > 0
-        and (
-            mae_move / norm_atr
+        and
+        (
+            mae_move
+            / norm_atr
         ) >= ADVERSE_1_ATR
-        and "adverse_1atr_ts" not in events
+        and
+        "adverse_1atr_ts"
+        not in events
     ):
 
         for c in eligible:
@@ -1061,8 +1239,12 @@ def update_signal_record(
     latest = checkpoints[-1]
 
     if (
-        latest.get("reversal_watch")
-        and "reversal_watch_ts" not in events
+        latest.get(
+            "reversal_watch"
+        )
+        and
+        "reversal_watch_ts"
+        not in events
     ):
 
         events[
@@ -1070,8 +1252,12 @@ def update_signal_record(
         ] = latest["ts"]
 
     if (
-        latest.get("reversal_confirmed")
-        and "reversal_confirmed_ts" not in events
+        latest.get(
+            "reversal_confirmed"
+        )
+        and
+        "reversal_confirmed_ts"
+        not in events
     ):
 
         events[
@@ -1088,7 +1274,10 @@ def update_signal_record(
             Tuple[int, str]
         ] = []
 
-        if "favorable_1_5atr_ts" in events:
+        if (
+            "favorable_1_5atr_ts"
+            in events
+        ):
 
             decisive_candidates.append(
                 (
@@ -1099,7 +1288,10 @@ def update_signal_record(
                 )
             )
 
-        if "adverse_1atr_ts" in events:
+        if (
+            "adverse_1atr_ts"
+            in events
+        ):
 
             decisive_candidates.append(
                 (
@@ -1110,7 +1302,10 @@ def update_signal_record(
                 )
             )
 
-        if "reversal_confirmed_ts" in events:
+        if (
+            "reversal_confirmed_ts"
+            in events
+        ):
 
             reversal_outcome = (
                 "REVERSAL_LONG"
@@ -1133,12 +1328,20 @@ def update_signal_record(
                 key=lambda x: x[0]
             )
 
-            record["first_decisive"] = {
-                "ts": decisive_candidates[0][0],
-                "outcome": decisive_candidates[0][1],
+            record[
+                "first_decisive"
+            ] = {
+                "ts": (
+                    decisive_candidates[0][0]
+                ),
+                "outcome": (
+                    decisive_candidates[0][1]
+                ),
             }
 
-    record["last_update_ts"] = latest["ts"]
+    record[
+        "last_update_ts"
+    ] = latest["ts"]
 
     # ========================================================
     # Final 24H outcome
@@ -1151,17 +1354,21 @@ def update_signal_record(
 
     if horizon_reached:
 
-        record["completed"] = True
+        record[
+            "completed"
+        ] = True
 
-        record["completed_at"] = (
-            eligible[-1].ts
-        )
+        record[
+            "completed_at"
+        ] = eligible[-1].ts
 
         if latest.get(
             "reversal_confirmed"
         ):
 
-            record["outcome"] = (
+            record[
+                "outcome"
+            ] = (
                 "REVERSAL_LONG"
                 if direction == "SHORT"
                 else "REVERSAL_SHORT"
@@ -1171,31 +1378,44 @@ def update_signal_record(
             FAVORABLE_1_5_ATR
         ):
 
-            record["outcome"] = (
+            record[
+                "outcome"
+            ] = (
                 "DIRECTIONAL_EXPANSION"
             )
 
         elif (
             norm_atr > 0
-            and (
-                mae_move / norm_atr
+            and
+            (
+                mae_move
+                / norm_atr
             ) >= ADVERSE_1_ATR
         ):
 
-            record["outcome"] = (
+            record[
+                "outcome"
+            ] = (
                 "DIRECTIONAL_FAILURE"
             )
 
         else:
 
-            record["outcome"] = (
+            record[
+                "outcome"
+            ] = (
                 "NO_EXPANSION"
             )
 
     else:
 
-        record["completed"] = False
-        record["outcome"] = "OPEN"
+        record[
+            "completed"
+        ] = False
+
+        record[
+            "outcome"
+        ] = "OPEN"
 
     return True
 
@@ -1248,11 +1468,16 @@ def main() -> None:
                 snapshot,
                 dict,
             )
-            or "signal" not in snapshot
+            or
+            "signal"
+            not in snapshot
         ):
+
             continue
 
-        signal = snapshot["signal"]
+        signal = snapshot[
+            "signal"
+        ]
 
         try:
 
@@ -1265,6 +1490,7 @@ def main() -> None:
             TypeError,
             ValueError,
         ):
+
             continue
 
         if (
@@ -1282,11 +1508,6 @@ def main() -> None:
 
     # ========================================================
     # One market-data request per ACTIVE symbol.
-    #
-    # This avoids:
-    # - one request per signal
-    # - duplicate requests for the same symbol
-    # - unnecessary requests for expired snapshots
     # ========================================================
 
     symbols = sorted(
@@ -1294,8 +1515,13 @@ def main() -> None:
             s["signal"]["symbol"]
             for s in active_snapshots
             if (
-                isinstance(s, dict)
-                and "signal" in s
+                isinstance(
+                    s,
+                    dict,
+                )
+                and
+                "signal"
+                in s
             )
         }
     )
@@ -1311,12 +1537,16 @@ def main() -> None:
 
             candles_by_symbol[
                 symbol
-            ] = get_candles(symbol)
+            ] = get_candles(
+                symbol
+            )
 
         except Exception as exc:
 
             print(
-                f"[ERROR] {symbol}: {exc}"
+                f"[ERROR] "
+                f"{symbol}: "
+                f"{exc}"
             )
 
     # ========================================================
@@ -1332,16 +1562,22 @@ def main() -> None:
                 snapshot,
                 dict,
             )
-            or "signal" not in snapshot
+            or
+            "signal"
+            not in snapshot
         ):
+
             continue
 
         sid = (
             snapshot.get(
                 "signal_id"
             )
-            or signal_id(
-                snapshot["signal"]
+            or
+            signal_id(
+                snapshot[
+                    "signal"
+                ]
             )
         )
 
@@ -1349,27 +1585,39 @@ def main() -> None:
             "signal"
         ]["symbol"]
 
-        candles = candles_by_symbol.get(
-            symbol,
-            [],
+        candles = (
+            candles_by_symbol.get(
+                symbol,
+                [],
+            )
         )
 
         if not candles:
             continue
 
-        record = records.get(sid)
+        record = records.get(
+            sid
+        )
 
         if record is None:
 
             record = {
+
                 "signal_id": sid,
+
                 "snapshot": snapshot,
+
                 "checkpoints": [],
+
                 "events": {},
+
                 "completed": False,
+
                 "outcome": "OPEN",
+
                 "created_at": int(
-                    time.time() * 1000
+                    time.time()
+                    * 1000
                 ),
             }
 
@@ -1386,13 +1634,15 @@ def main() -> None:
 
         except Exception as exc:
 
-            record["last_error"] = str(
-                exc
-            )
+            record[
+                "last_error"
+            ] = str(exc)
 
             print(
-                f"[ERROR] tracking "
-                f"{sid}: {exc}"
+                f"[ERROR] "
+                f"tracking "
+                f"{sid}: "
+                f"{exc}"
             )
 
     # ========================================================
@@ -1413,12 +1663,17 @@ def main() -> None:
         reverse=True,
     )
 
-    tracker["signals"] = dict(
+    tracker[
+        "signals"
+    ] = dict(
         ordered[:1000]
     )
 
-    tracker["updated_at"] = int(
-        time.time() * 1000
+    tracker[
+        "updated_at"
+    ] = int(
+        time.time()
+        * 1000
     )
 
     tracker[
@@ -1441,7 +1696,12 @@ def main() -> None:
         for r in tracker[
             "signals"
         ].values()
-        if r.get("outcome") == "OPEN"
+        if (
+            r.get(
+                "outcome"
+            )
+            == "OPEN"
+        )
     )
 
     reversal_count = sum(
