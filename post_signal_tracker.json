@@ -1,6 +1,113 @@
 {
   "schema_version": 1,
   "signals": {
+    "BREVUSDT:SHORT:1790125200000": {
+      "signal_id": "BREVUSDT:SHORT:1790125200000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "BREVUSDT:SHORT:1790125200000",
+        "captured_at": 1790126763207,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "BREVUSDT",
+          "direction": "SHORT",
+          "cisd_open": 0.09028,
+          "cisd_close": 0.08818,
+          "cisd_body_ratio": 0.6862745098039246,
+          "signal_open": 0.08947,
+          "signal_close": 0.08901,
+          "signal_ts": 1790125200000,
+          "structure_level": 0.09001,
+          "swing_ts": 1790120700000,
+          "box_high": 0.09108,
+          "box_low": 0.08925,
+          "box_range": 0.0018299999999999983,
+          "break_distance": 0.00023999999999999022,
+          "atr": 0.00042285714285714246,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": 120,
+          "htf_room_ma": 0.07860633333333333,
+          "htf_room_distance_atr": 4.56,
+          "pre_move_fast": 0.020253164556961963,
+          "pre_move_slow": 0.017658095132987422,
+          "signal_range_atr": 2.128378378378376,
+          "signal_body_atr": 1.0878378378378109,
+          "breakout_distance_atr": 0.567567567567545,
+          "timing_status": "BREAKOUT",
+          "timing_penalty": 0.0,
+          "early_score": 2.5,
+          "key_level_type": "Supply",
+          "key_level_low": 0.08898,
+          "key_level_high": 0.09414,
+          "key_level_score": 23.3,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.0,
+          "score": 79.3,
+          "breakout_score": 12.0,
+          "candle_score": 5.0,
+          "rvol_score": 5.0,
+          "structure_score": 15.0,
+          "four_hour_score": 12.0,
+          "rvol": 4.49,
+          "pattern_score": 7.0,
+          "pattern_label": "IFVG RETEST",
+          "pattern_ifvg": true,
+          "pattern_retest": true,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [
+        {
+          "signal_id": "BREVUSDT:SHORT:1790125200000",
+          "ts": 1790137800000,
+          "time": "2026-09-23T04:30:00+00:00",
+          "close": 0.09004,
+          "high": 0.09004,
+          "low": 0.09001,
+          "current_move_pct": -1.1572,
+          "mfe_pct": 0.764,
+          "mae_pct": -1.4156,
+          "mfe_atr": 1.6081,
+          "mae_atr": 2.9797,
+          "ma120": 0.0892446667,
+          "ma200": 0.08727805,
+          "atr14": 0.0003028571,
+          "structure_level": 0.09001,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
+        }
+      ],
+      "events": {
+        "favorable_1atr_ts": 1790127900000,
+        "favorable_1_5atr_ts": 1790127900000,
+        "adverse_1atr_ts": 1790132400000,
+        "reversal_watch_ts": 1790137800000
+      },
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1790139349755,
+      "metrics": {
+        "entry": 0.08901,
+        "latest_close": 0.09004,
+        "mfe_price": 0.08833,
+        "mae_price": 0.09027,
+        "mfe_pct": 0.764,
+        "mae_pct": 1.4156,
+        "mfe_atr": 1.6081,
+        "mae_atr": 2.9797
+      },
+      "first_decisive": {
+        "ts": 1790127900000,
+        "outcome": "DIRECTIONAL_EXPANSION"
+      },
+      "last_update_ts": 1790137800000
+    },
     "SIGNUSDT:SHORT:1790056800000": {
       "signal_id": "SIGNUSDT:SHORT:1790056800000",
       "snapshot": {
@@ -177,6 +284,30 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "SIGNUSDT:SHORT:1790056800000",
+          "ts": 1790137800000,
+          "time": "2026-09-23T04:30:00+00:00",
+          "close": 0.012919,
+          "high": 0.012988,
+          "low": 0.012912,
+          "current_move_pct": -8.5539,
+          "mfe_pct": -0.0084,
+          "mae_pct": -9.1337,
+          "mfe_atr": -0.0176,
+          "mae_atr": 19.1181,
+          "ma120": 0.012333775,
+          "ma200": 0.012231225,
+          "atr14": 7.4e-05,
+          "structure_level": 0.011929,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
@@ -188,19 +319,19 @@
       "created_at": 1790076736418,
       "metrics": {
         "entry": 0.011901,
-        "latest_close": 0.012542,
+        "latest_close": 0.012919,
         "mfe_price": 0.011902,
-        "mae_price": 0.012659,
+        "mae_price": 0.012988,
         "mfe_pct": -0.0084,
-        "mae_pct": 6.3692,
+        "mae_pct": 9.1337,
         "mfe_atr": -0.0176,
-        "mae_atr": 13.3317
+        "mae_atr": 19.1181
       },
       "first_decisive": {
         "ts": 1790058600000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790121600000
+      "last_update_ts": 1790137800000
     },
     "SFPUSDT:LONG:1789970400000": {
       "signal_id": "SFPUSDT:LONG:1789970400000",
@@ -5597,6 +5728,68 @@
       "last_update_ts": 1789957800000,
       "completed_at": 1789957800000
     },
+    "BREVUSDT:SHORT:1789866000000": {
+      "signal_id": "BREVUSDT:SHORT:1789866000000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "BREVUSDT:SHORT:1789866000000",
+        "captured_at": 1789866987922,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "BREVUSDT",
+          "direction": "SHORT",
+          "cisd_open": 0.0853,
+          "cisd_close": 0.08448,
+          "cisd_body_ratio": 0.312977099236642,
+          "signal_open": 0.08387,
+          "signal_close": 0.08283,
+          "signal_ts": 1789866000000,
+          "structure_level": 0.08442,
+          "swing_ts": 1789862400000,
+          "box_high": 0.08574,
+          "box_low": 0.08332,
+          "box_range": 0.0024199999999999916,
+          "break_distance": 0.0004900000000000043,
+          "atr": 0.0005714285714285719,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": 120,
+          "htf_room_ma": 0.0770895,
+          "htf_room_distance_atr": 2.6,
+          "pre_move_fast": 0.02495585638610944,
+          "pre_move_slow": 0.023806717737183195,
+          "signal_range_atr": 2.1875,
+          "signal_body_atr": 1.8199999999999972,
+          "breakout_distance_atr": 0.8575000000000068,
+          "timing_status": "LATE",
+          "timing_penalty": 12.0,
+          "early_score": 0.5,
+          "key_level_type": "Supply",
+          "key_level_low": 0.08142,
+          "key_level_high": 0.08274,
+          "key_level_score": 23.3,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.04069767441860772,
+          "score": 69.3,
+          "breakout_score": 15.0,
+          "candle_score": 10.0,
+          "rvol_score": 5.0,
+          "structure_score": 15.0,
+          "four_hour_score": 9.0,
+          "rvol": 3.1,
+          "pattern_score": 4.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [],
+      "events": {},
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1790139349756
+    },
     "XLMUSDT:SHORT:1789729200000": {
       "signal_id": "XLMUSDT:SHORT:1789729200000",
       "snapshot": {
@@ -7253,6 +7446,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790123003869,
-  "updated_at_iso": "2026-09-23T00:23:23.869006+00:00"
+  "updated_at": 1790139349756,
+  "updated_at_iso": "2026-09-23T04:55:49.756317+00:00"
 }
