@@ -129,6 +129,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "REDUSDT:LONG:1790251200000",
+          "ts": 1790293500000,
+          "time": "2026-09-24T23:45:00+00:00",
+          "close": 0.1612,
+          "high": 0.1612,
+          "low": 0.1602,
+          "current_move_pct": 3.466,
+          "mfe_pct": 4.172,
+          "mae_pct": -1.3479,
+          "mfe_atr": 6.7407,
+          "mae_atr": 2.1778,
+          "ma120": 0.1549983333,
+          "ma200": 0.156699,
+          "atr14": 0.0003428571,
+          "structure_level": 0.1555,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -153,7 +177,7 @@
         "ts": 1790253000000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790285400000
+      "last_update_ts": 1790293500000
     },
     "RVNUSDT:LONG:1790251200000": {
       "signal_id": "RVNUSDT:LONG:1790251200000",
@@ -283,6 +307,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "RVNUSDT:LONG:1790251200000",
+          "ts": 1790293500000,
+          "time": "2026-09-24T23:45:00+00:00",
+          "close": 0.002393,
+          "high": 0.002393,
+          "low": 0.002381,
+          "current_move_pct": 1.2267,
+          "mfe_pct": 2.3689,
+          "mae_pct": -1.6497,
+          "mfe_atr": 3.2,
+          "mae_atr": 2.2286,
+          "ma120": 0.0023266583,
+          "ma200": 0.00235953,
+          "atr14": 9.5e-06,
+          "structure_level": 0.002347,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -295,7 +343,7 @@
       "created_at": 1790259795185,
       "metrics": {
         "entry": 0.002364,
-        "latest_close": 0.002396,
+        "latest_close": 0.002393,
         "mfe_price": 0.00242,
         "mae_price": 0.002325,
         "mfe_pct": 2.3689,
@@ -307,7 +355,7 @@
         "ts": 1790253000000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790285400000
+      "last_update_ts": 1790293500000
     },
     "ATUSDT:SHORT:1790211600000": {
       "signal_id": "ATUSDT:SHORT:1790211600000",
@@ -485,6 +533,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "ATUSDT:SHORT:1790211600000",
+          "ts": 1790293500000,
+          "time": "2026-09-24T23:45:00+00:00",
+          "close": 0.1553,
+          "high": 0.1553,
+          "low": 0.1553,
+          "current_move_pct": 0.7668,
+          "mfe_pct": 2.6837,
+          "mae_pct": -0.7029,
+          "mfe_atr": 6.3226,
+          "mae_atr": 1.6559,
+          "ma120": 0.1561,
+          "ma200": 0.158831,
+          "atr14": 0.00035,
+          "structure_level": 0.1566,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -497,7 +569,7 @@
       "created_at": 1790224693041,
       "metrics": {
         "entry": 0.1565,
-        "latest_close": 0.155,
+        "latest_close": 0.1553,
         "mfe_price": 0.1523,
         "mae_price": 0.1576,
         "mfe_pct": 2.6837,
@@ -509,7 +581,7 @@
         "ts": 1790220600000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790285400000
+      "last_update_ts": 1790293500000
     },
     "1INCHUSDT:SHORT:1790164800000": {
       "signal_id": "1INCHUSDT:SHORT:1790164800000",
@@ -8487,6 +8559,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790286304568,
-  "updated_at_iso": "2026-09-24T21:45:04.568413+00:00"
+  "updated_at": 1790294706964,
+  "updated_at_iso": "2026-09-25T00:05:06.964014+00:00"
 }
