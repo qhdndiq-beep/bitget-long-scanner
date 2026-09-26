@@ -105,30 +105,56 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "1000XECUSDT:SHORT:1790431200000",
+          "ts": 1790455500000,
+          "time": "2026-09-26T20:45:00+00:00",
+          "close": 0.008844,
+          "high": 0.008844,
+          "low": 0.00883,
+          "current_move_pct": 2.3626,
+          "mfe_pct": 2.8483,
+          "mae_pct": -1.4573,
+          "mfe_atr": 9.5556,
+          "mae_atr": 4.8889,
+          "ma120": 0.0091241,
+          "ma200": 0.00909735,
+          "atr14": 3.65714e-05,
+          "structure_level": 0.009106,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
         "adverse_1atr_ts": 1790432100000,
-        "reversal_watch_ts": 1790443800000
+        "reversal_watch_ts": 1790443800000,
+        "favorable_1atr_ts": 1790451000000,
+        "favorable_1_5atr_ts": 1790452800000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1790433270347,
       "metrics": {
         "entry": 0.009058,
-        "latest_close": 0.009169,
-        "mfe_price": 0.009058,
+        "latest_close": 0.008844,
+        "mfe_price": 0.0088,
         "mae_price": 0.00919,
-        "mfe_pct": 0.0,
+        "mfe_pct": 2.8483,
         "mae_pct": 1.4573,
-        "mfe_atr": 0.0,
+        "mfe_atr": 9.5556,
         "mae_atr": 4.8889
       },
       "first_decisive": {
         "ts": 1790432100000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790443800000
+      "last_update_ts": 1790455500000
     },
     "BTWUSDT:LONG:1790431200000": {
       "signal_id": "BTWUSDT:LONG:1790431200000",
@@ -234,6 +260,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "BTWUSDT:LONG:1790431200000",
+          "ts": 1790455500000,
+          "time": "2026-09-26T20:45:00+00:00",
+          "close": 1.04859,
+          "high": 1.05427,
+          "low": 1.04313,
+          "current_move_pct": 7.2167,
+          "mfe_pct": 11.0929,
+          "mae_pct": -17.9303,
+          "mfe_atr": 5.025,
+          "mae_atr": 8.1223,
+          "ma120": 1.0729038333,
+          "ma200": 1.0510572,
+          "atr14": 0.0133442857,
+          "structure_level": 0.95788,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -247,7 +297,7 @@
       "created_at": 1790433270347,
       "metrics": {
         "entry": 0.97801,
-        "latest_close": 1.0683,
+        "latest_close": 1.04859,
         "mfe_price": 1.0865,
         "mae_price": 0.80265,
         "mfe_pct": 11.0929,
@@ -259,7 +309,7 @@
         "ts": 1790432100000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790443800000
+      "last_update_ts": 1790455500000
     },
     "METUSDT:LONG:1790357400000": {
       "signal_id": "METUSDT:LONG:1790357400000",
@@ -11425,6 +11475,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790445521828,
-  "updated_at_iso": "2026-09-26T17:58:41.828761+00:00"
+  "updated_at": 1790456612442,
+  "updated_at_iso": "2026-09-26T21:03:32.442082+00:00"
 }
