@@ -81,29 +81,54 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "1000XECUSDT:SHORT:1790431200000",
+          "ts": 1790443800000,
+          "time": "2026-09-26T17:30:00+00:00",
+          "close": 0.009169,
+          "high": 0.00919,
+          "low": 0.009169,
+          "current_move_pct": -1.2254,
+          "mfe_pct": -0.0,
+          "mae_pct": -1.4573,
+          "mfe_atr": 0.0,
+          "mae_atr": 4.8889,
+          "ma120": 0.0091333917,
+          "ma200": 0.009101915,
+          "atr14": 1.67143e-05,
+          "structure_level": 0.009106,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
-        "adverse_1atr_ts": 1790432100000
+        "adverse_1atr_ts": 1790432100000,
+        "reversal_watch_ts": 1790443800000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1790433270347,
       "metrics": {
         "entry": 0.009058,
-        "latest_close": 0.009079,
+        "latest_close": 0.009169,
         "mfe_price": 0.009058,
-        "mae_price": 0.009087,
+        "mae_price": 0.00919,
         "mfe_pct": 0.0,
-        "mae_pct": 0.3202,
+        "mae_pct": 1.4573,
         "mfe_atr": 0.0,
-        "mae_atr": 1.0741
+        "mae_atr": 4.8889
       },
       "first_decisive": {
         "ts": 1790432100000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790432100000
+      "last_update_ts": 1790443800000
     },
     "BTWUSDT:LONG:1790431200000": {
       "signal_id": "BTWUSDT:LONG:1790431200000",
@@ -185,30 +210,56 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "BTWUSDT:LONG:1790431200000",
+          "ts": 1790443800000,
+          "time": "2026-09-26T17:30:00+00:00",
+          "close": 1.0683,
+          "high": 1.075,
+          "low": 1.06027,
+          "current_move_pct": 9.232,
+          "mfe_pct": 11.0929,
+          "mae_pct": -17.9303,
+          "mfe_atr": 5.025,
+          "mae_atr": 8.1223,
+          "ma120": 1.0844945,
+          "ma200": 1.0474664,
+          "atr14": 0.0463878571,
+          "structure_level": 0.95788,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
         "adverse_1atr_ts": 1790432100000,
-        "reversal_watch_ts": 1790432100000
+        "reversal_watch_ts": 1790432100000,
+        "favorable_1atr_ts": 1790433900000,
+        "favorable_1_5atr_ts": 1790433900000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1790433270347,
       "metrics": {
         "entry": 0.97801,
-        "latest_close": 0.86274,
-        "mfe_price": 0.98429,
+        "latest_close": 1.0683,
+        "mfe_price": 1.0865,
         "mae_price": 0.80265,
-        "mfe_pct": 0.6421,
+        "mfe_pct": 11.0929,
         "mae_pct": 17.9303,
-        "mfe_atr": 0.2909,
+        "mfe_atr": 5.025,
         "mae_atr": 8.1223
       },
       "first_decisive": {
         "ts": 1790432100000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790432100000
+      "last_update_ts": 1790443800000
     },
     "METUSDT:LONG:1790357400000": {
       "signal_id": "METUSDT:LONG:1790357400000",
@@ -11374,6 +11425,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790433270347,
-  "updated_at_iso": "2026-09-26T14:34:30.347934+00:00"
+  "updated_at": 1790445521828,
+  "updated_at_iso": "2026-09-26T17:58:41.828761+00:00"
 }
