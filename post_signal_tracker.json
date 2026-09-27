@@ -1,6 +1,68 @@
 {
   "schema_version": 1,
   "signals": {
+    "哈基米USDT:LONG:1790491500000": {
+      "signal_id": "哈基米USDT:LONG:1790491500000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "哈基米USDT:LONG:1790491500000",
+        "captured_at": 1790493026633,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "哈基米USDT",
+          "direction": "LONG",
+          "cisd_open": 0.03373,
+          "cisd_close": 0.0349,
+          "cisd_body_ratio": 0.6763005780346824,
+          "signal_open": 0.036,
+          "signal_close": 0.03652,
+          "signal_ts": 1790491500000,
+          "structure_level": 0.03525,
+          "swing_ts": 1790485200000,
+          "box_high": 0.0362,
+          "box_low": 0.03419,
+          "box_range": 0.002010000000000005,
+          "break_distance": 0.0003199999999999939,
+          "atr": 0.00037142857142857116,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": null,
+          "htf_room_ma": null,
+          "htf_room_distance_atr": null,
+          "pre_move_fast": 0.03309759547383303,
+          "pre_move_slow": 0.04701834862385308,
+          "signal_range_atr": 1.9653846153846022,
+          "signal_body_atr": 1.4,
+          "breakout_distance_atr": 0.8615384615384457,
+          "timing_status": "LATE",
+          "timing_penalty": 12.0,
+          "early_score": 0.5,
+          "key_level_type": "Demand",
+          "key_level_low": 0.03685,
+          "key_level_high": 0.03999,
+          "key_level_score": 20.0,
+          "key_level_inside": false,
+          "key_level_distance_atr": 0.3162217659137616,
+          "score": 65.0,
+          "breakout_score": 15.0,
+          "candle_score": 10.0,
+          "rvol_score": 1.0,
+          "structure_score": 15.0,
+          "four_hour_score": 12.0,
+          "rvol": 0.92,
+          "pattern_score": 4.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [],
+      "events": {},
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1790493102857
+    },
     "1000XECUSDT:SHORT:1790431200000": {
       "signal_id": "1000XECUSDT:SHORT:1790431200000",
       "snapshot": {
@@ -177,6 +239,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "1000XECUSDT:SHORT:1790431200000",
+          "ts": 1790491500000,
+          "time": "2026-09-27T06:45:00+00:00",
+          "close": 0.008912,
+          "high": 0.008912,
+          "low": 0.008903,
+          "current_move_pct": 1.6118,
+          "mfe_pct": 3.6211,
+          "mae_pct": -1.4573,
+          "mfe_atr": 12.1481,
+          "mae_atr": 4.8889,
+          "ma120": 0.009026825,
+          "ma200": 0.009059845,
+          "atr14": 3.75e-05,
+          "structure_level": 0.009106,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -190,19 +276,19 @@
       "created_at": 1790433270347,
       "metrics": {
         "entry": 0.009058,
-        "latest_close": 0.008787,
-        "mfe_price": 0.008787,
+        "latest_close": 0.008912,
+        "mfe_price": 0.00873,
         "mae_price": 0.00919,
-        "mfe_pct": 2.9918,
+        "mfe_pct": 3.6211,
         "mae_pct": 1.4573,
-        "mfe_atr": 10.037,
+        "mfe_atr": 12.1481,
         "mae_atr": 4.8889
       },
       "first_decisive": {
         "ts": 1790432100000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790471700000
+      "last_update_ts": 1790491500000
     },
     "BTWUSDT:LONG:1790431200000": {
       "signal_id": "BTWUSDT:LONG:1790431200000",
@@ -380,6 +466,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "BTWUSDT:LONG:1790431200000",
+          "ts": 1790491500000,
+          "time": "2026-09-27T06:45:00+00:00",
+          "close": 1.0588,
+          "high": 1.06102,
+          "low": 1.05531,
+          "current_move_pct": 8.2607,
+          "mfe_pct": 11.0929,
+          "mae_pct": -17.9303,
+          "mfe_atr": 5.025,
+          "mae_atr": 8.1223,
+          "ma120": 0.9921403333,
+          "ma200": 1.06299965,
+          "atr14": 0.0104814286,
+          "structure_level": 0.95788,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -393,7 +503,7 @@
       "created_at": 1790433270347,
       "metrics": {
         "entry": 0.97801,
-        "latest_close": 1.0176,
+        "latest_close": 1.0588,
         "mfe_price": 1.0865,
         "mae_price": 0.80265,
         "mfe_pct": 11.0929,
@@ -405,7 +515,7 @@
         "ts": 1790432100000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790471700000
+      "last_update_ts": 1790491500000
     },
     "METUSDT:LONG:1790357400000": {
       "signal_id": "METUSDT:LONG:1790357400000",
@@ -10082,6 +10192,68 @@
       "outcome": "OPEN",
       "created_at": 1790259795185
     },
+    "哈基米USDT:LONG:1789700400000": {
+      "signal_id": "哈基米USDT:LONG:1789700400000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "哈基米USDT:LONG:1789700400000",
+        "captured_at": 1789701524211,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "哈基米USDT",
+          "direction": "LONG",
+          "cisd_open": 0.03225,
+          "cisd_close": 0.03358,
+          "cisd_body_ratio": 0.7687861271676277,
+          "signal_open": 0.03391,
+          "signal_close": 0.03414,
+          "signal_ts": 1789700400000,
+          "structure_level": 0.03399,
+          "swing_ts": 1789687800000,
+          "box_high": 0.03399,
+          "box_low": 0.0323,
+          "box_range": 0.001689999999999997,
+          "break_distance": 0.00014999999999999736,
+          "atr": 0.00041428571428571377,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": null,
+          "htf_room_ma": null,
+          "htf_room_distance_atr": null,
+          "pre_move_fast": 0.032667876588021706,
+          "pre_move_slow": 0.024917442209546604,
+          "signal_range_atr": 1.231034482758614,
+          "signal_body_atr": 0.5551724137930899,
+          "breakout_distance_atr": 0.36206896551723544,
+          "timing_status": "BREAKOUT",
+          "timing_penalty": 0.0,
+          "early_score": 2.5,
+          "key_level_type": "Demand",
+          "key_level_low": 0.03163,
+          "key_level_high": 0.03368,
+          "key_level_score": 23.3,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.22100205902539233,
+          "score": 76.3,
+          "breakout_score": 9.0,
+          "candle_score": 7.0,
+          "rvol_score": 3.0,
+          "structure_score": 15.0,
+          "four_hour_score": 15.0,
+          "rvol": 1.34,
+          "pattern_score": 4.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [],
+      "events": {},
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1790493102857
+    },
     "VETUSDT:LONG:1789697700000": {
       "signal_id": "VETUSDT:LONG:1789697700000",
       "snapshot": {
@@ -11571,6 +11743,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790473496373,
-  "updated_at_iso": "2026-09-27T01:44:56.373464+00:00"
+  "updated_at": 1790493102858,
+  "updated_at_iso": "2026-09-27T07:11:42.858095+00:00"
 }
