@@ -105,6 +105,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "哈基米USDT:LONG:1790491500000",
+          "ts": 1790539200000,
+          "time": "2026-09-27T20:00:00+00:00",
+          "close": 0.03506,
+          "high": 0.03506,
+          "low": 0.03486,
+          "current_move_pct": -3.9978,
+          "mfe_pct": 2.6835,
+          "mae_pct": -4.655,
+          "mfe_atr": 2.6385,
+          "mae_atr": 4.5769,
+          "ma120": 0.0352406667,
+          "ma200": 0.0346244,
+          "atr14": 0.0001478571,
+          "structure_level": 0.03525,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -117,7 +141,7 @@
       "created_at": 1790493102857,
       "metrics": {
         "entry": 0.03652,
-        "latest_close": 0.03499,
+        "latest_close": 0.03506,
         "mfe_price": 0.0375,
         "mae_price": 0.03482,
         "mfe_pct": 2.6835,
@@ -129,7 +153,7 @@
         "ts": 1790492400000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1790529300000
+      "last_update_ts": 1790539200000
     },
     "1000XECUSDT:SHORT:1790431200000": {
       "signal_id": "1000XECUSDT:SHORT:1790431200000",
@@ -11859,6 +11883,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790530963068,
-  "updated_at_iso": "2026-09-27T17:42:43.068795+00:00"
+  "updated_at": 1790540874591,
+  "updated_at_iso": "2026-09-27T20:27:54.591205+00:00"
 }
