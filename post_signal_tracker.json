@@ -81,6 +81,30 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "ERAUSDT:LONG:1790693100000",
+          "ts": 1790721900000,
+          "time": "2026-09-29T22:45:00+00:00",
+          "close": 0.06655,
+          "high": 0.06655,
+          "low": 0.06643,
+          "current_move_pct": -3.4808,
+          "mfe_pct": 0.0,
+          "mae_pct": -3.8869,
+          "mfe_atr": 0.0,
+          "mae_atr": 9.6452,
+          "ma120": 0.0676375,
+          "ma200": 0.06807535,
+          "atr14": 0.0001157143,
+          "structure_level": 0.06843,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
@@ -92,7 +116,7 @@
       "created_at": 1790709639615,
       "metrics": {
         "entry": 0.06895,
-        "latest_close": 0.06725,
+        "latest_close": 0.06655,
         "mfe_price": 0.06895,
         "mae_price": 0.06627,
         "mfe_pct": 0.0,
@@ -104,7 +128,7 @@
         "ts": 1790694000000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790708400000
+      "last_update_ts": 1790721900000
     },
     "EGLDUSDT:LONG:1790669700000": {
       "signal_id": "EGLDUSDT:LONG:1790669700000",
@@ -210,18 +234,43 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "EGLDUSDT:LONG:1790669700000",
+          "ts": 1790721900000,
+          "time": "2026-09-29T22:45:00+00:00",
+          "close": 4.528,
+          "high": 4.534,
+          "low": 4.528,
+          "current_move_pct": -2.3085,
+          "mfe_pct": 0.8846,
+          "mae_pct": -2.7616,
+          "mfe_atr": 1.1103,
+          "mae_atr": 3.4662,
+          "ma120": 4.5549416667,
+          "ma200": 4.560895,
+          "atr14": 0.0234285714,
+          "structure_level": 4.609,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
         "favorable_1atr_ts": 1790684100000,
-        "adverse_1atr_ts": 1790672400000
+        "adverse_1atr_ts": 1790672400000,
+        "reversal_watch_ts": 1790721900000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1790690403773,
       "metrics": {
         "entry": 4.635,
-        "latest_close": 4.582,
+        "latest_close": 4.528,
         "mfe_price": 4.676,
         "mae_price": 4.507,
         "mfe_pct": 0.8846,
@@ -233,7 +282,7 @@
         "ts": 1790672400000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790708400000
+      "last_update_ts": 1790721900000
     },
     "SNXUSDT:SHORT:1790647200000": {
       "signal_id": "SNXUSDT:SHORT:1790647200000",
@@ -363,6 +412,30 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "SNXUSDT:SHORT:1790647200000",
+          "ts": 1790721900000,
+          "time": "2026-09-29T22:45:00+00:00",
+          "close": 0.2531,
+          "high": 0.2531,
+          "low": 0.2529,
+          "current_move_pct": -6.2107,
+          "mfe_pct": 0.3357,
+          "mae_pct": -9.9035,
+          "mfe_atr": 0.3784,
+          "mae_atr": 11.1622,
+          "ma120": 0.2488166667,
+          "ma200": 0.2499865,
+          "atr14": 0.0017357143,
+          "structure_level": 0.2393,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
@@ -374,7 +447,7 @@
       "created_at": 1790665271742,
       "metrics": {
         "entry": 0.2383,
-        "latest_close": 0.256,
+        "latest_close": 0.2531,
         "mfe_price": 0.2375,
         "mae_price": 0.2619,
         "mfe_pct": 0.3357,
@@ -386,7 +459,7 @@
         "ts": 1790652600000,
         "outcome": "DIRECTIONAL_FAILURE"
       },
-      "last_update_ts": 1790708400000
+      "last_update_ts": 1790721900000
     },
     "MMTUSDT:SHORT:1790583300000": {
       "signal_id": "MMTUSDT:SHORT:1790583300000",
@@ -15191,6 +15264,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790709639616,
-  "updated_at_iso": "2026-09-29T19:20:39.616557+00:00"
+  "updated_at": 1790722935107,
+  "updated_at_iso": "2026-09-29T23:02:15.107146+00:00"
 }
