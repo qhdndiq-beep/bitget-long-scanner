@@ -1,6 +1,110 @@
 {
   "schema_version": 1,
   "signals": {
+    "SNXUSDT:SHORT:1790647200000": {
+      "signal_id": "SNXUSDT:SHORT:1790647200000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "SNXUSDT:SHORT:1790647200000",
+        "captured_at": 1790648179961,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "SNXUSDT",
+          "direction": "SHORT",
+          "cisd_open": 0.269,
+          "cisd_close": 0.252,
+          "cisd_body_ratio": 0.8056872037914706,
+          "signal_open": 0.2409,
+          "signal_close": 0.2383,
+          "signal_ts": 1790647200000,
+          "structure_level": 0.2393,
+          "swing_ts": 1790633700000,
+          "box_high": 0.2477,
+          "box_low": 0.2391,
+          "box_range": 0.008599999999999997,
+          "break_distance": 0.0007999999999999952,
+          "atr": 0.0021142857142857113,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": 120,
+          "htf_room_ma": 0.22750333333333334,
+          "htf_room_distance_atr": 1.06,
+          "pre_move_fast": 0.014882182720132253,
+          "pre_move_slow": 0.03483191575536653,
+          "signal_range_atr": 2.033783783783786,
+          "signal_body_atr": 1.2297297297297274,
+          "breakout_distance_atr": 0.3783783783783766,
+          "timing_status": "BREAKOUT",
+          "timing_penalty": 0.0,
+          "early_score": 2.0,
+          "key_level_type": "Supply",
+          "key_level_low": 0.2282,
+          "key_level_high": 0.2317,
+          "key_level_score": 16.3,
+          "key_level_inside": false,
+          "key_level_distance_atr": 0.6488764044943843,
+          "score": 70.3,
+          "breakout_score": 9.0,
+          "candle_score": 9.0,
+          "rvol_score": 5.0,
+          "structure_score": 15.0,
+          "four_hour_score": 12.0,
+          "rvol": 5.93,
+          "pattern_score": 4.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [
+        {
+          "signal_id": "SNXUSDT:SHORT:1790647200000",
+          "ts": 1790664300000,
+          "time": "2026-09-29T06:45:00+00:00",
+          "close": 0.2459,
+          "high": 0.2459,
+          "low": 0.2446,
+          "current_move_pct": -3.1893,
+          "mfe_pct": 0.3357,
+          "mae_pct": -3.1893,
+          "mfe_atr": 0.3784,
+          "mae_atr": 3.5946,
+          "ma120": 0.2453,
+          "ma200": 0.2528785,
+          "atr14": 0.0015,
+          "structure_level": 0.2393,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
+        }
+      ],
+      "events": {
+        "adverse_1atr_ts": 1790652600000
+      },
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1790665271742,
+      "metrics": {
+        "entry": 0.2383,
+        "latest_close": 0.2459,
+        "mfe_price": 0.2375,
+        "mae_price": 0.2459,
+        "mfe_pct": 0.3357,
+        "mae_pct": 3.1893,
+        "mfe_atr": 0.3784,
+        "mae_atr": 3.5946
+      },
+      "first_decisive": {
+        "ts": 1790652600000,
+        "outcome": "DIRECTIONAL_FAILURE"
+      },
+      "last_update_ts": 1790664300000
+    },
     "MMTUSDT:SHORT:1790583300000": {
       "signal_id": "MMTUSDT:SHORT:1790583300000",
       "snapshot": {
@@ -129,19 +233,44 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "MMTUSDT:SHORT:1790583300000",
+          "ts": 1790664300000,
+          "time": "2026-09-29T06:45:00+00:00",
+          "close": 0.1818,
+          "high": 0.1819,
+          "low": 0.1803,
+          "current_move_pct": -4.3029,
+          "mfe_pct": 2.7539,
+          "mae_pct": -5.6799,
+          "mfe_atr": 1.9255,
+          "mae_atr": 3.9713,
+          "ma120": 0.1784933333,
+          "ma200": 0.17964,
+          "atr14": 0.0011071429,
+          "structure_level": 0.1792,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
         "favorable_1atr_ts": 1790586000000,
         "favorable_1_5atr_ts": 1790586000000,
-        "adverse_1atr_ts": 1790595900000
+        "adverse_1atr_ts": 1790595900000,
+        "reversal_watch_ts": 1790664300000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1790611548606,
       "metrics": {
         "entry": 0.1743,
-        "latest_close": 0.1792,
+        "latest_close": 0.1818,
         "mfe_price": 0.1695,
         "mae_price": 0.1842,
         "mfe_pct": 2.7539,
@@ -153,7 +282,7 @@
         "ts": 1790586000000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1790643600000
+      "last_update_ts": 1790664300000
     },
     "ATHUSDT:SHORT:1790559000000": {
       "signal_id": "ATHUSDT:SHORT:1790559000000",
@@ -14779,6 +14908,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1790644803025,
-  "updated_at_iso": "2026-09-29T01:20:03.025032+00:00"
+  "updated_at": 1790665271743,
+  "updated_at_iso": "2026-09-29T07:01:11.743211+00:00"
 }
