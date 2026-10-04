@@ -129,6 +129,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "FILUSDT:LONG:1791037800000",
+          "ts": 1791073800000,
+          "time": "2026-10-04T00:30:00+00:00",
+          "close": 1.0611,
+          "high": 1.0634,
+          "low": 1.0601,
+          "current_move_pct": -1.1643,
+          "mfe_pct": 0.9128,
+          "mae_pct": -1.9654,
+          "mfe_atr": 1.657,
+          "mae_atr": 3.5676,
+          "ma120": 1.0496466667,
+          "ma200": 1.0425235,
+          "atr14": 0.003,
+          "structure_level": 1.0715,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -141,7 +165,7 @@
       "created_at": 1791043829179,
       "metrics": {
         "entry": 1.0736,
-        "latest_close": 1.0631,
+        "latest_close": 1.0611,
         "mfe_price": 1.0834,
         "mae_price": 1.0525,
         "mfe_pct": 0.9128,
@@ -153,7 +177,7 @@
         "ts": 1791038700000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1791063900000
+      "last_update_ts": 1791073800000
     },
     "BIOUSDT:LONG:1791037800000": {
       "signal_id": "BIOUSDT:LONG:1791037800000",
@@ -283,6 +307,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "BIOUSDT:LONG:1791037800000",
+          "ts": 1791073800000,
+          "time": "2026-10-04T00:30:00+00:00",
+          "close": 0.03123,
+          "high": 0.03128,
+          "low": 0.03119,
+          "current_move_pct": -0.6995,
+          "mfe_pct": 1.1129,
+          "mae_pct": -1.3037,
+          "mfe_atr": 1.8919,
+          "mae_atr": 2.2162,
+          "ma120": 0.0310135833,
+          "ma200": 0.0309819,
+          "atr14": 7.78571e-05,
+          "structure_level": 0.03125,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -295,19 +343,19 @@
       "created_at": 1791043829179,
       "metrics": {
         "entry": 0.03145,
-        "latest_close": 0.03134,
+        "latest_close": 0.03123,
         "mfe_price": 0.0318,
-        "mae_price": 0.03107,
+        "mae_price": 0.03104,
         "mfe_pct": 1.1129,
-        "mae_pct": 1.2083,
+        "mae_pct": 1.3037,
         "mfe_atr": 1.8919,
-        "mae_atr": 2.0541
+        "mae_atr": 2.2162
       },
       "first_decisive": {
         "ts": 1791042300000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1791063900000
+      "last_update_ts": 1791073800000
     },
     "ATUSDT:SHORT:1790970300000": {
       "signal_id": "ATUSDT:SHORT:1790970300000",
@@ -22048,6 +22096,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1791065601359,
-  "updated_at_iso": "2026-10-03T22:13:21.359009+00:00"
+  "updated_at": 1791075219624,
+  "updated_at_iso": "2026-10-04T00:53:39.624270+00:00"
 }
