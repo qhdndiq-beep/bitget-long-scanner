@@ -1,6 +1,113 @@
 {
   "schema_version": 1,
   "signals": {
+    "ARXUSDT:LONG:1791292500000": {
+      "signal_id": "ARXUSDT:LONG:1791292500000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "ARXUSDT:LONG:1791292500000",
+        "captured_at": 1791293641133,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "ARXUSDT",
+          "direction": "LONG",
+          "cisd_open": 0.28605,
+          "cisd_close": 0.29432,
+          "cisd_body_ratio": 0.6135014836795255,
+          "signal_open": 0.28717,
+          "signal_close": 0.28999,
+          "signal_ts": 1791292500000,
+          "structure_level": 0.28573,
+          "swing_ts": 1791286200000,
+          "box_high": 0.28969,
+          "box_low": 0.28138,
+          "box_range": 0.008309999999999984,
+          "break_distance": 0.00030000000000002247,
+          "atr": 0.0019650000000000023,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": null,
+          "htf_room_ma": null,
+          "htf_room_distance_atr": null,
+          "pre_move_fast": 0.020085830870972453,
+          "pre_move_slow": 0.020516610360360364,
+          "signal_range_atr": 2.061068702290073,
+          "signal_body_atr": 1.435114503816815,
+          "breakout_distance_atr": 0.15267175572520209,
+          "timing_status": "BREAKOUT",
+          "timing_penalty": 0.0,
+          "early_score": 2.5,
+          "key_level_type": "Bullish OB",
+          "key_level_low": 0.25706,
+          "key_level_high": 0.28605,
+          "key_level_score": 18.3,
+          "key_level_inside": false,
+          "key_level_distance_atr": 0.3838552540013917,
+          "score": 71.3,
+          "breakout_score": 6.0,
+          "candle_score": 8.0,
+          "rvol_score": 5.0,
+          "structure_score": 15.0,
+          "four_hour_score": 12.0,
+          "rvol": 2.23,
+          "pattern_score": 7.0,
+          "pattern_label": "IFVG RETEST",
+          "pattern_ifvg": true,
+          "pattern_retest": true,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [
+        {
+          "signal_id": "ARXUSDT:LONG:1791292500000",
+          "ts": 1791301500000,
+          "time": "2026-10-06T15:45:00+00:00",
+          "close": 0.27736,
+          "high": 0.28005,
+          "low": 0.27736,
+          "current_move_pct": -4.3553,
+          "mfe_pct": 1.7932,
+          "mae_pct": -4.3553,
+          "mfe_atr": 2.6463,
+          "mae_atr": 6.4275,
+          "ma120": 0.2813066667,
+          "ma200": 0.27876585,
+          "atr14": 0.0036242857,
+          "structure_level": 0.28573,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
+        }
+      ],
+      "events": {
+        "favorable_1atr_ts": 1791293400000,
+        "favorable_1_5atr_ts": 1791293400000,
+        "adverse_1atr_ts": 1791297000000,
+        "reversal_watch_ts": 1791301500000
+      },
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1791302564255,
+      "metrics": {
+        "entry": 0.28999,
+        "latest_close": 0.27736,
+        "mfe_price": 0.29519,
+        "mae_price": 0.27736,
+        "mfe_pct": 1.7932,
+        "mae_pct": 4.3553,
+        "mfe_atr": 2.6463,
+        "mae_atr": 6.4275
+      },
+      "first_decisive": {
+        "ts": 1791293400000,
+        "outcome": "DIRECTIONAL_EXPANSION"
+      },
+      "last_update_ts": 1791301500000
+    },
     "PROSUSDT:SHORT:1791266400000": {
       "signal_id": "PROSUSDT:SHORT:1791266400000",
       "snapshot": {
@@ -81,23 +188,54 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "PROSUSDT:SHORT:1791266400000",
+          "ts": 1791301500000,
+          "time": "2026-10-06T15:45:00+00:00",
+          "close": 0.6754,
+          "high": 0.6822,
+          "low": 0.6719,
+          "current_move_pct": 5.7888,
+          "mfe_pct": 6.277,
+          "mae_pct": -0.5998,
+          "mfe_atr": 5.431,
+          "mae_atr": 0.519,
+          "ma120": 0.72886,
+          "ma200": 0.7555435,
+          "atr14": 0.0039,
+          "structure_level": 0.719,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
-      "events": {},
+      "events": {
+        "favorable_1atr_ts": 1791285300000,
+        "favorable_1_5atr_ts": 1791287100000
+      },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1791278551819,
       "metrics": {
         "entry": 0.7169,
-        "latest_close": 0.714,
-        "mfe_price": 0.7114,
+        "latest_close": 0.6754,
+        "mfe_price": 0.6719,
         "mae_price": 0.7212,
-        "mfe_pct": 0.7672,
+        "mfe_pct": 6.277,
         "mae_pct": 0.5998,
-        "mfe_atr": 0.6638,
+        "mfe_atr": 5.431,
         "mae_atr": 0.519
       },
-      "last_update_ts": 1791277200000
+      "last_update_ts": 1791301500000,
+      "first_decisive": {
+        "ts": 1791287100000,
+        "outcome": "DIRECTIONAL_EXPANSION"
+      }
     },
     "ZROUSDT:SHORT:1791163800000": {
       "signal_id": "ZROUSDT:SHORT:1791163800000",
@@ -23249,6 +23387,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1791278551819,
-  "updated_at_iso": "2026-10-06T09:22:31.819585+00:00"
+  "updated_at": 1791302564256,
+  "updated_at_iso": "2026-10-06T16:02:44.256471+00:00"
 }
