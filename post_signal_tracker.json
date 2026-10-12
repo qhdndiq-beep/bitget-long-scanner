@@ -1,6 +1,104 @@
 {
   "schema_version": 1,
   "signals": {
+    "XMRUSDT:SHORT:1791796500000": {
+      "signal_id": "XMRUSDT:SHORT:1791796500000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "XMRUSDT:SHORT:1791796500000",
+        "captured_at": 1791798064044,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "XMRUSDT",
+          "direction": "SHORT",
+          "cisd_open": 537.99,
+          "cisd_close": 535.17,
+          "cisd_body_ratio": 0.3785234899328961,
+          "signal_open": 531.66,
+          "signal_close": 530.16,
+          "signal_ts": 1791796500000,
+          "structure_level": 531.63,
+          "swing_ts": 1791784800000,
+          "box_high": 539.31,
+          "box_low": 531.24,
+          "box_range": 8.069999999999936,
+          "break_distance": 1.080000000000041,
+          "atr": 1.9664285714285776,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": null,
+          "htf_room_ma": null,
+          "htf_room_distance_atr": null,
+          "pre_move_fast": 0.009639094373459018,
+          "pre_move_slow": 0.010747872816838318,
+          "signal_range_atr": 1.1086087904104902,
+          "signal_body_atr": 0.7628042135851774,
+          "breakout_distance_atr": 0.5492190337813485,
+          "timing_status": "BREAKOUT",
+          "timing_penalty": 0.0,
+          "early_score": 4.5,
+          "key_level_type": "Supply",
+          "key_level_low": 524.98,
+          "key_level_high": 530.63,
+          "key_level_score": 25.0,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.0,
+          "score": 76.0,
+          "breakout_score": 12.0,
+          "candle_score": 8.0,
+          "rvol_score": 3.0,
+          "structure_score": 15.0,
+          "four_hour_score": 9.0,
+          "rvol": 1.4,
+          "pattern_score": 4.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [
+        {
+          "signal_id": "XMRUSDT:SHORT:1791796500000",
+          "ts": 1791797400000,
+          "time": "2026-10-12T09:30:00+00:00",
+          "close": 530.45,
+          "high": 531.06,
+          "low": 530.16,
+          "current_move_pct": -0.0547,
+          "mfe_pct": -0.0,
+          "mae_pct": -0.1698,
+          "mfe_atr": 0.0,
+          "mae_atr": 0.4577,
+          "ma120": 534.4310833333,
+          "ma200": 530.83235,
+          "atr14": 1.9042857143,
+          "structure_level": 531.63,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
+        }
+      ],
+      "events": {},
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1791798550419,
+      "metrics": {
+        "entry": 530.16,
+        "latest_close": 530.45,
+        "mfe_price": 530.16,
+        "mae_price": 531.06,
+        "mfe_pct": 0.0,
+        "mae_pct": 0.1698,
+        "mfe_atr": 0.0,
+        "mae_atr": 0.4577
+      },
+      "last_update_ts": 1791797400000
+    },
     "SOONUSDT:LONG:1791770400000": {
       "signal_id": "SOONUSDT:LONG:1791770400000",
       "snapshot": {
@@ -81,25 +179,54 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "SOONUSDT:LONG:1791770400000",
+          "ts": 1791797400000,
+          "time": "2026-10-12T09:30:00+00:00",
+          "close": 0.3092,
+          "high": 0.3092,
+          "low": 0.3067,
+          "current_move_pct": -1.1193,
+          "mfe_pct": 0.7035,
+          "mae_pct": -3.6776,
+          "mfe_atr": 1.4064,
+          "mae_atr": 7.3516,
+          "ma120": 0.3059175,
+          "ma200": 0.306501,
+          "atr14": 0.0019857143,
+          "structure_level": 0.308,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
-        "favorable_1atr_ts": 1791771300000
+        "favorable_1atr_ts": 1791771300000,
+        "adverse_1atr_ts": 1791774000000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1791772870475,
       "metrics": {
         "entry": 0.3127,
-        "latest_close": 0.3138,
-        "mfe_price": 0.3148,
-        "mae_price": 0.3123,
-        "mfe_pct": 0.6716,
-        "mae_pct": 0.1279,
-        "mfe_atr": 1.3425,
-        "mae_atr": 0.2557
+        "latest_close": 0.3092,
+        "mfe_price": 0.3149,
+        "mae_price": 0.3012,
+        "mfe_pct": 0.7035,
+        "mae_pct": 3.6776,
+        "mfe_atr": 1.4064,
+        "mae_atr": 7.3516
       },
-      "last_update_ts": 1791771300000
+      "last_update_ts": 1791797400000,
+      "first_decisive": {
+        "ts": 1791774000000,
+        "outcome": "DIRECTIONAL_FAILURE"
+      }
     },
     "STXUSDT:SHORT:1791703800000": {
       "signal_id": "STXUSDT:SHORT:1791703800000",
@@ -29642,6 +29769,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1791772870476,
-  "updated_at_iso": "2026-10-12T02:41:10.476468+00:00"
+  "updated_at": 1791798550420,
+  "updated_at_iso": "2026-10-12T09:49:10.420645+00:00"
 }
