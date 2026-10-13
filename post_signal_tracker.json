@@ -1,6 +1,112 @@
 {
   "schema_version": 1,
   "signals": {
+    "OPUSDT:LONG:1791907200000": {
+      "signal_id": "OPUSDT:LONG:1791907200000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "OPUSDT:LONG:1791907200000",
+        "captured_at": 1791908637731,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "OPUSDT",
+          "direction": "LONG",
+          "cisd_open": 0.1349,
+          "cisd_close": 0.1397,
+          "cisd_body_ratio": 0.8571428571428537,
+          "signal_open": 0.1421,
+          "signal_close": 0.146,
+          "signal_ts": 1791907200000,
+          "structure_level": 0.1451,
+          "swing_ts": 1791902700000,
+          "box_high": 0.1451,
+          "box_low": 0.1344,
+          "box_range": 0.010700000000000015,
+          "break_distance": 0.0008999999999999841,
+          "atr": 0.0025285714285714334,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": null,
+          "htf_room_ma": null,
+          "htf_room_distance_atr": null,
+          "pre_move_fast": 0.017421602787456462,
+          "pre_move_slow": 0.031073446327683524,
+          "signal_range_atr": 2.3333333333333353,
+          "signal_body_atr": 1.542372881355924,
+          "breakout_distance_atr": 0.35593220338982356,
+          "timing_status": "LATE",
+          "timing_penalty": 8.0,
+          "early_score": 1.5,
+          "key_level_type": "Demand",
+          "key_level_low": 0.141,
+          "key_level_high": 0.142,
+          "key_level_score": 21.7,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.7639836289222371,
+          "score": 71.7,
+          "breakout_score": 9.0,
+          "candle_score": 8.0,
+          "rvol_score": 5.0,
+          "structure_score": 15.0,
+          "four_hour_score": 15.0,
+          "rvol": 4.07,
+          "pattern_score": 6.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": true
+        }
+      },
+      "checkpoints": [
+        {
+          "signal_id": "OPUSDT:LONG:1791907200000",
+          "ts": 1791925200000,
+          "time": "2026-10-13T21:00:00+00:00",
+          "close": 0.1582,
+          "high": 0.1609,
+          "low": 0.157,
+          "current_move_pct": 8.3562,
+          "mfe_pct": 10.2055,
+          "mae_pct": -1.9863,
+          "mfe_atr": 5.8927,
+          "mae_atr": 1.1469,
+          "ma120": 0.1383875,
+          "ma200": 0.139553,
+          "atr14": 0.00315,
+          "structure_level": 0.1451,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
+        }
+      ],
+      "events": {
+        "favorable_1atr_ts": 1791914400000,
+        "favorable_1_5atr_ts": 1791914400000,
+        "adverse_1atr_ts": 1791910800000
+      },
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1791926468914,
+      "metrics": {
+        "entry": 0.146,
+        "latest_close": 0.1582,
+        "mfe_price": 0.1609,
+        "mae_price": 0.1431,
+        "mfe_pct": 10.2055,
+        "mae_pct": 1.9863,
+        "mfe_atr": 5.8927,
+        "mae_atr": 1.1469
+      },
+      "first_decisive": {
+        "ts": 1791910800000,
+        "outcome": "DIRECTIONAL_FAILURE"
+      },
+      "last_update_ts": 1791925200000
+    },
     "XMRUSDT:SHORT:1791796500000": {
       "signal_id": "XMRUSDT:SHORT:1791796500000",
       "snapshot": {
@@ -29899,6 +30005,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1791907812499,
-  "updated_at_iso": "2026-10-13T16:10:12.499221+00:00"
+  "updated_at": 1791926468915,
+  "updated_at_iso": "2026-10-13T21:21:08.915220+00:00"
 }
