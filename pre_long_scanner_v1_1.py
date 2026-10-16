@@ -288,7 +288,7 @@ def ifvg_retest(candles, direction):
     start = max(2, end - PATTERN_LOOKBACK + 1)
     opposite = "SHORT" if direction == "LONG" else "LONG"
 
-    for i in range(end - 2, start - 1, -1):
+    for i in range(end - 1, start - 1, -1):
         zone = fvg_zone(candles, i, opposite)
         if not zone or end - i > IFVG_MAX_AGE:
             continue
@@ -317,11 +317,11 @@ def ifvg_retest(candles, direction):
 
 def compression(candles):
     end = len(candles) - 1
-    stop = end
-    start = stop - COMPRESSION_LOOKBACK
+    start = end - COMPRESSION_LOOKBACK + 1
     if start < 0:
         return None
-    recent = candles[start:stop]
+    # Use the most recent COMPRESSION_LOOKBACK closed candles, including the latest closed candle.
+    recent = candles[start:end + 1]
     a = latest_atr(candles)
     if not a:
         return None
@@ -374,7 +374,7 @@ def score(key, comp, box, fast, slow, volume):
         s += 10.0 if fast <= 0.012 and slow <= 0.020 else 7.0 if fast <= 0.022 and slow <= 0.035 else 4.0
     if volume is not None:
         s += 5.0 if volume >= 2.0 else 4.0 if volume >= 1.5 else 3.0 if volume >= 1.2 else 2.0 if volume >= 1.0 else 0.0
-    return round(s, 1)
+    return round(min(s, 100.0), 1)
 
 
 def evaluate(symbol):
@@ -455,8 +455,10 @@ def send_telegram(message):
         method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urlopen(req, timeout=TIMEOUT):
-        pass
+    with urlopen(req, timeout=TIMEOUT) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        if response.status != 200 or not payload.get("ok", False):
+            raise RuntimeError(f"Telegram API rejected message: {payload}")
 
 
 def message(x):
