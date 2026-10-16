@@ -57,7 +57,7 @@ IFVG_MAX_AGE = 48
 PATTERN_LOOKBACK = 80
 
 COMPRESSION_LOOKBACK = 8
-COMPRESSION_MAX_ATR = 2.20
+COMPRESSION_MAX_ATR = 3.00  # Slightly wider pre-breakout compression; measured in ATR
 
 PREMOVE_FAST = 4
 PREMOVE_SLOW = 8
@@ -75,7 +75,11 @@ _DIAG = {
     "symbols_checked": 0, "insufficient_candles": 0, "api_errors": 0,
     "sweep_found": 0, "cisd_found": 0, "recency_pass": 0,
     "key_box_pass": 0, "ifvg_found": 0, "compression_pass": 0,
-    "premove_pass": 0, "score_pass": 0
+    "premove_pass": 0, "score_pass": 0,
+    "compression_reject": 0, "premove_reject": 0,
+    "compression_ratio_sum": 0.0, "compression_ratio_max": 0.0,
+    "premove_fast_min": None, "premove_fast_max": None,
+    "premove_slow_min": None, "premove_slow_max": None
 }
 
 def diag_inc(name, amount=1):
@@ -425,12 +429,27 @@ def evaluate(symbol):
                 continue
             diag_inc("ifvg_found")
             comp = compression(c15)
-            if not comp or not comp["ok"]:
+            if not comp:
+                diag_inc("compression_reject")
+                continue
+            with _DIAG_LOCK:
+                _DIAG["compression_ratio_sum"] += comp["ratio"]
+                _DIAG["compression_ratio_max"] = max(_DIAG["compression_ratio_max"], comp["ratio"])
+            if not comp["ok"]:
+                diag_inc("compression_reject")
                 continue
             diag_inc("compression_pass")
 
             fast, slow = pre_move(c15, direction, PREMOVE_FAST), pre_move(c15, direction, PREMOVE_SLOW)
-            if fast is None or slow is None or fast > PREMOVE_MAX or slow > PREMOVE_MAX:
+            with _DIAG_LOCK:
+                for label, value in (("fast", fast), ("slow", slow)):
+                    if value is not None:
+                        lo_key, hi_key = f"premove_{label}_min", f"premove_{label}_max"
+                        _DIAG[lo_key] = value if _DIAG[lo_key] is None else min(_DIAG[lo_key], value)
+                        _DIAG[hi_key] = value if _DIAG[hi_key] is None else max(_DIAG[hi_key], value)
+            # Reject excessive run-up, but also reject sharp adverse drift before the setup.
+            if fast is None or slow is None or fast > PREMOVE_MAX or slow > PREMOVE_MAX or fast < -0.020 or slow < -0.030:
+                diag_inc("premove_reject")
                 continue
             diag_inc("premove_pass")
             vol = rvol(c15)
@@ -531,7 +550,16 @@ def main():
         )
 
     print(f"PRE candidates: {len(results)}")
-    print("DIAGNOSTICS: " + json.dumps(_DIAG, ensure_ascii=False, sort_keys=True))
+    diag = dict(_DIAG)
+    comp_n = diag.get("compression_reject", 0) + diag.get("compression_pass", 0)
+    diag["compression_ratio_avg"] = round(diag["compression_ratio_sum"] / comp_n, 3) if comp_n else None
+    diag["compression_ratio_max"] = round(diag["compression_ratio_max"], 3)
+    for k in ("compression_ratio_sum",):
+        diag.pop(k, None)
+    for k in ("premove_fast_min", "premove_fast_max", "premove_slow_min", "premove_slow_max"):
+        if diag[k] is not None:
+            diag[k] = round(diag[k] * 100, 2)  # percentage for easy reading
+    print("DIAGNOSTICS: " + json.dumps(diag, ensure_ascii=False, sort_keys=True))
     for x in results:
         try:
             send_telegram(message(x))
