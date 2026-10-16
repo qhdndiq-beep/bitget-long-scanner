@@ -70,6 +70,19 @@ MIN_PRE_SCORE = 60.0
 MAX_RESULTS = 10
 REPORT_FILE = "pre_long_candidates.json"
 
+_DIAG_LOCK = threading.Lock()
+_DIAG = {
+    "symbols_checked": 0, "insufficient_candles": 0, "api_errors": 0,
+    "sweep_found": 0, "cisd_found": 0, "recency_pass": 0,
+    "key_box_pass": 0, "ifvg_found": 0, "compression_pass": 0,
+    "premove_pass": 0, "score_pass": 0
+}
+
+def diag_inc(name, amount=1):
+    with _DIAG_LOCK:
+        _DIAG[name] = _DIAG.get(name, 0) + amount
+
+
 
 class Candle:
     def __init__(self, row):
@@ -382,37 +395,50 @@ def evaluate(symbol):
         c4 = get_candles(symbol, "4H", H4_LIMIT)
         c15 = get_candles(symbol, "15m", M15_LIMIT)
         if len(c4) < 60 or len(c15) < 100:
+            diag_inc("insufficient_candles")
             return []
+        diag_inc("symbols_checked")
 
         out = []
         for direction in ("LONG", "SHORT"):
             sweep = latest_sweep(c4, direction)
             if not sweep:
                 continue
+            diag_inc("sweep_found")
             cisd = cisd_after_sweep(c4, direction, sweep)
             if not cisd:
                 continue
+            diag_inc("cisd_found")
             recency = len(c4) - 1 - cisd["index"]
             if recency > MAX_CISD_RECENCY:
                 continue
+            diag_inc("recency_pass")
 
             key = nearest_key_level(c4, c15, direction)
             box = box_state(c15, direction)
-            pattern = ifvg_retest(c15, direction)
-            comp = compression(c15)
-            fast, slow = pre_move(c15, direction, PREMOVE_FAST), pre_move(c15, direction, PREMOVE_SLOW)
-            vol = rvol(c15)
-
             if not key or not box or box["broken"] or box["distance_atr"] > MAX_BOX_DISTANCE_ATR:
                 continue
-            if not pattern or not comp or not comp["ok"]:
+            diag_inc("key_box_pass")
+
+            pattern = ifvg_retest(c15, direction)
+            if not pattern:
                 continue
+            diag_inc("ifvg_found")
+            comp = compression(c15)
+            if not comp or not comp["ok"]:
+                continue
+            diag_inc("compression_pass")
+
+            fast, slow = pre_move(c15, direction, PREMOVE_FAST), pre_move(c15, direction, PREMOVE_SLOW)
             if fast is None or slow is None or fast > PREMOVE_MAX or slow > PREMOVE_MAX:
                 continue
+            diag_inc("premove_pass")
+            vol = rvol(c15)
 
             sc = score(key, comp, box, fast, slow, vol)
             if sc < MIN_PRE_SCORE:
                 continue
+            diag_inc("score_pass")
 
             cur = c15[-1]
             out.append({
@@ -432,6 +458,7 @@ def evaluate(symbol):
             })
         return out
     except Exception as e:
+        diag_inc("api_errors")
         print(f"{symbol}: {e}")
         return []
 
@@ -504,6 +531,7 @@ def main():
         )
 
     print(f"PRE candidates: {len(results)}")
+    print("DIAGNOSTICS: " + json.dumps(_DIAG, ensure_ascii=False, sort_keys=True))
     for x in results:
         try:
             send_telegram(message(x))
