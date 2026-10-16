@@ -438,6 +438,11 @@ def evaluate(symbol):
             if not comp:
                 diag_inc("compression_reject")
                 continue
+            # A retest can leave fewer than 3 closed candles; treat missing
+            # compression ratio as a rejected setup instead of raising TypeError.
+            if comp["ratio"] is None:
+                diag_inc("compression_reject")
+                continue
             with _DIAG_LOCK:
                 _DIAG["compression_ratio_sum"] += comp["ratio"]
                 _DIAG["compression_ratio_max"] = max(_DIAG["compression_ratio_max"], comp["ratio"])
