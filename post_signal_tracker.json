@@ -1,6 +1,112 @@
 {
   "schema_version": 1,
   "signals": {
+    "RIVERUSDT:LONG:1792160100000": {
+      "signal_id": "RIVERUSDT:LONG:1792160100000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "RIVERUSDT:LONG:1792160100000",
+        "captured_at": 1792161882426,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "RIVERUSDT",
+          "direction": "LONG",
+          "cisd_open": 0.988,
+          "cisd_close": 1.07,
+          "cisd_body_ratio": 0.845360824742269,
+          "signal_open": 1.153,
+          "signal_close": 1.179,
+          "signal_ts": 1792160100000,
+          "structure_level": 1.173,
+          "swing_ts": 1792154700000,
+          "box_high": 1.173,
+          "box_low": 1.085,
+          "box_range": 0.08800000000000008,
+          "break_distance": 0.006000000000000005,
+          "atr": 0.01757142857142857,
+          "htf_room_penalty": 6.0,
+          "htf_room_label": "CLOSE",
+          "htf_room_ma_period": 200,
+          "htf_room_ma": 1.194245,
+          "htf_room_distance_atr": 0.26,
+          "pre_move_fast": 0.026109660574412556,
+          "pre_move_slow": 0.02879581151832473,
+          "signal_range_atr": 1.593495934959351,
+          "signal_body_atr": 1.4796747967479689,
+          "breakout_distance_atr": 0.34146341463414664,
+          "timing_status": "BREAKOUT",
+          "timing_penalty": 0.0,
+          "early_score": 1.5,
+          "key_level_type": "Demand",
+          "key_level_low": 1.115,
+          "key_level_high": 1.154,
+          "key_level_score": 25.0,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.42424242424242625,
+          "score": 73.0,
+          "breakout_score": 9.0,
+          "candle_score": 10.0,
+          "rvol_score": 2.0,
+          "structure_score": 15.0,
+          "four_hour_score": 14.0,
+          "rvol": 1.14,
+          "pattern_score": 4.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [
+        {
+          "signal_id": "RIVERUSDT:LONG:1792160100000",
+          "ts": 1792171800000,
+          "time": "2026-10-16T17:30:00+00:00",
+          "close": 1.118,
+          "high": 1.129,
+          "low": 1.1,
+          "current_move_pct": -5.1739,
+          "mfe_pct": 2.7142,
+          "mae_pct": -7.888,
+          "mfe_atr": 1.8211,
+          "mae_atr": 5.2927,
+          "ma120": 1.0795333333,
+          "ma200": 1.064205,
+          "atr14": 0.0262142857,
+          "structure_level": 1.173,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
+        }
+      ],
+      "events": {
+        "favorable_1atr_ts": 1792161900000,
+        "favorable_1_5atr_ts": 1792161900000,
+        "adverse_1atr_ts": 1792163700000
+      },
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1792173493972,
+      "metrics": {
+        "entry": 1.179,
+        "latest_close": 1.118,
+        "mfe_price": 1.211,
+        "mae_price": 1.086,
+        "mfe_pct": 2.7142,
+        "mae_pct": 7.888,
+        "mfe_atr": 1.8211,
+        "mae_atr": 5.2927
+      },
+      "first_decisive": {
+        "ts": 1792161900000,
+        "outcome": "DIRECTIONAL_EXPANSION"
+      },
+      "last_update_ts": 1792171800000
+    },
     "VETUSDT:LONG:1792125900000": {
       "signal_id": "VETUSDT:LONG:1792125900000",
       "snapshot": {
@@ -105,31 +211,56 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "VETUSDT:LONG:1792125900000",
+          "ts": 1792171800000,
+          "time": "2026-10-16T17:30:00+00:00",
+          "close": 0.00692,
+          "high": 0.006926,
+          "low": 0.006832,
+          "current_move_pct": -3.5271,
+          "mfe_pct": 0.8644,
+          "mae_pct": -5.4231,
+          "mfe_atr": 1.5782,
+          "mae_atr": 9.9018,
+          "ma120": 0.0070400083,
+          "ma200": 0.00697413,
+          "atr14": 4.91429e-05,
+          "structure_level": 0.007151,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
         "favorable_1atr_ts": 1792126800000,
         "favorable_1_5atr_ts": 1792126800000,
-        "adverse_1atr_ts": 1792127700000
+        "adverse_1atr_ts": 1792127700000,
+        "reversal_watch_ts": 1792171800000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1792141671598,
       "metrics": {
         "entry": 0.007173,
-        "latest_close": 0.007052,
+        "latest_close": 0.00692,
         "mfe_price": 0.007235,
-        "mae_price": 0.007024,
+        "mae_price": 0.006784,
         "mfe_pct": 0.8644,
-        "mae_pct": 2.0772,
+        "mae_pct": 5.4231,
         "mfe_atr": 1.5782,
-        "mae_atr": 3.7927
+        "mae_atr": 9.9018
       },
       "first_decisive": {
         "ts": 1792126800000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792157400000
+      "last_update_ts": 1792171800000
     },
     "KSMUSDT:LONG:1792125900000": {
       "signal_id": "KSMUSDT:LONG:1792125900000",
@@ -235,6 +366,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "KSMUSDT:LONG:1792125900000",
+          "ts": 1792171800000,
+          "time": "2026-10-16T17:30:00+00:00",
+          "close": 4.509,
+          "high": 4.509,
+          "low": 4.443,
+          "current_move_pct": -1.3995,
+          "mfe_pct": 2.1867,
+          "mae_pct": -2.9958,
+          "mfe_atr": 5.668,
+          "mae_atr": 7.7652,
+          "ma120": 4.5158333333,
+          "ma200": 4.481115,
+          "atr14": 0.0386428571,
+          "structure_level": 4.536,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -247,19 +402,19 @@
       "created_at": 1792141671599,
       "metrics": {
         "entry": 4.573,
-        "latest_close": 4.558,
+        "latest_close": 4.509,
         "mfe_price": 4.673,
-        "mae_price": 4.541,
+        "mae_price": 4.436,
         "mfe_pct": 2.1867,
-        "mae_pct": 0.6998,
+        "mae_pct": 2.9958,
         "mfe_atr": 5.668,
-        "mae_atr": 1.8138
+        "mae_atr": 7.7652
       },
       "first_decisive": {
         "ts": 1792126800000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792157400000
+      "last_update_ts": 1792171800000
     },
     "GMTUSDT:LONG:1792125900000": {
       "signal_id": "GMTUSDT:LONG:1792125900000",
@@ -365,31 +520,56 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "GMTUSDT:LONG:1792125900000",
+          "ts": 1792171800000,
+          "time": "2026-10-16T17:30:00+00:00",
+          "close": 0.007768,
+          "high": 0.007768,
+          "low": 0.007676,
+          "current_move_pct": -2.6688,
+          "mfe_pct": 0.8019,
+          "mae_pct": -4.2977,
+          "mfe_atr": 1.8174,
+          "mae_atr": 9.7404,
+          "ma120": 0.007854625,
+          "ma200": 0.00780738,
+          "atr14": 5.7e-05,
+          "structure_level": 0.007869,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
         "favorable_1atr_ts": 1792126800000,
         "favorable_1_5atr_ts": 1792126800000,
-        "adverse_1atr_ts": 1792131300000
+        "adverse_1atr_ts": 1792131300000,
+        "reversal_watch_ts": 1792171800000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1792141671599,
       "metrics": {
         "entry": 0.007981,
-        "latest_close": 0.007877,
+        "latest_close": 0.007768,
         "mfe_price": 0.008045,
-        "mae_price": 0.00786,
+        "mae_price": 0.007638,
         "mfe_pct": 0.8019,
-        "mae_pct": 1.5161,
+        "mae_pct": 4.2977,
         "mfe_atr": 1.8174,
-        "mae_atr": 3.4361
+        "mae_atr": 9.7404
       },
       "first_decisive": {
         "ts": 1792126800000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792157400000
+      "last_update_ts": 1792171800000
     },
     "KASUSDT:LONG:1792125900000": {
       "signal_id": "KASUSDT:LONG:1792125900000",
@@ -495,30 +675,55 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "KASUSDT:LONG:1792125900000",
+          "ts": 1792171800000,
+          "time": "2026-10-16T17:30:00+00:00",
+          "close": 0.0364,
+          "high": 0.03657,
+          "low": 0.03599,
+          "current_move_pct": -1.3015,
+          "mfe_pct": 4.6367,
+          "mae_pct": -2.9013,
+          "mfe_atr": 7.1892,
+          "mae_atr": 4.4985,
+          "ma120": 0.0365355833,
+          "ma200": 0.0364908,
+          "atr14": 0.0003807143,
+          "structure_level": 0.03622,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
         "favorable_1atr_ts": 1792132200000,
-        "favorable_1_5atr_ts": 1792132200000
+        "favorable_1_5atr_ts": 1792132200000,
+        "adverse_1atr_ts": 1792163700000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1792141671599,
       "metrics": {
         "entry": 0.03688,
-        "latest_close": 0.03757,
+        "latest_close": 0.0364,
         "mfe_price": 0.03859,
-        "mae_price": 0.03668,
+        "mae_price": 0.03581,
         "mfe_pct": 4.6367,
-        "mae_pct": 0.5423,
+        "mae_pct": 2.9013,
         "mfe_atr": 7.1892,
-        "mae_atr": 0.8408
+        "mae_atr": 4.4985
       },
       "first_decisive": {
         "ts": 1792132200000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792157400000
+      "last_update_ts": 1792171800000
     },
     "WLFIUSDT:LONG:1792076400000": {
       "signal_id": "WLFIUSDT:LONG:1792076400000",
@@ -28987,6 +29192,68 @@
       "last_update_ts": 1789959600000,
       "completed_at": 1789959600000
     },
+    "RIVERUSDT:SHORT:1789873200000": {
+      "signal_id": "RIVERUSDT:SHORT:1789873200000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "RIVERUSDT:SHORT:1789873200000",
+        "captured_at": 1789874318449,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "RIVERUSDT",
+          "direction": "SHORT",
+          "cisd_open": 1.242,
+          "cisd_close": 1.233,
+          "cisd_body_ratio": 0.34615384615384187,
+          "signal_open": 1.222,
+          "signal_close": 1.194,
+          "signal_ts": 1789873200000,
+          "structure_level": 1.252,
+          "swing_ts": 1789868700000,
+          "box_high": 1.279,
+          "box_low": 1.207,
+          "box_range": 0.07199999999999984,
+          "break_distance": 0.013000000000000123,
+          "atr": 0.014857142857142855,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": null,
+          "htf_room_ma": null,
+          "htf_room_distance_atr": null,
+          "pre_move_fast": 0.0561264822134387,
+          "pre_move_slow": 0.047086991221069394,
+          "signal_range_atr": 2.3557692307692406,
+          "signal_body_atr": 1.8846153846153866,
+          "breakout_distance_atr": 0.8750000000000083,
+          "timing_status": "LATE",
+          "timing_penalty": 12.0,
+          "early_score": 0.0,
+          "key_level_type": "Supply",
+          "key_level_low": 1.185,
+          "key_level_high": 1.243,
+          "key_level_score": 23.3,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.0,
+          "score": 69.3,
+          "breakout_score": 15.0,
+          "candle_score": 10.0,
+          "rvol_score": 5.0,
+          "structure_score": 15.0,
+          "four_hour_score": 9.0,
+          "rvol": 3.17,
+          "pattern_score": 4.0,
+          "pattern_label": "IFVG",
+          "pattern_ifvg": true,
+          "pattern_retest": false,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [],
+      "events": {},
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1792173493973
+    },
     "GALAUSDT:SHORT:1789871400000": {
       "signal_id": "GALAUSDT:SHORT:1789871400000",
       "snapshot": {
@@ -31492,6 +31759,68 @@
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1790581541694
+    },
+    "RIVERUSDT:LONG:1789689600000": {
+      "signal_id": "RIVERUSDT:LONG:1789689600000",
+      "snapshot": {
+        "schema_version": 1,
+        "signal_id": "RIVERUSDT:LONG:1789689600000",
+        "captured_at": 1789691111383,
+        "scanner_version": "2.7",
+        "signal": {
+          "symbol": "RIVERUSDT",
+          "direction": "LONG",
+          "cisd_open": 1.183,
+          "cisd_close": 1.24,
+          "cisd_body_ratio": 0.9499999999999982,
+          "signal_open": 1.225,
+          "signal_close": 1.231,
+          "signal_ts": 1789689600000,
+          "structure_level": 1.221,
+          "swing_ts": 1789683300000,
+          "box_high": 1.229,
+          "box_low": 1.191,
+          "box_range": 0.038000000000000034,
+          "break_distance": 0.0020000000000000018,
+          "atr": 0.007000000000000006,
+          "htf_room_penalty": 0.0,
+          "htf_room_label": "ROOM OK",
+          "htf_room_ma_period": 120,
+          "htf_room_ma": 1.2972666666666666,
+          "htf_room_distance_atr": 1.5,
+          "pre_move_fast": 0.011503697617091217,
+          "pre_move_slow": 0.01903973509933786,
+          "signal_range_atr": 1.2857142857142698,
+          "signal_body_atr": 0.8571428571428571,
+          "breakout_distance_atr": 0.2857142857142857,
+          "timing_status": "BREAKOUT",
+          "timing_penalty": 0.0,
+          "early_score": 4.0,
+          "key_level_type": "Bullish OB",
+          "key_level_low": 1.22,
+          "key_level_high": 1.27,
+          "key_level_score": 25.0,
+          "key_level_inside": true,
+          "key_level_distance_atr": 0.0,
+          "score": 81.0,
+          "breakout_score": 6.0,
+          "candle_score": 9.0,
+          "rvol_score": 5.0,
+          "structure_score": 15.0,
+          "four_hour_score": 14.0,
+          "rvol": 3.35,
+          "pattern_score": 7.0,
+          "pattern_label": "IFVG RETEST",
+          "pattern_ifvg": true,
+          "pattern_retest": true,
+          "pattern_compression": false
+        }
+      },
+      "checkpoints": [],
+      "events": {},
+      "completed": false,
+      "outcome": "OPEN",
+      "created_at": 1792173493973
     },
     "BATUSDT:LONG:1789686900000": {
       "signal_id": "BATUSDT:LONG:1789686900000",
@@ -34842,6 +35171,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1792158926274,
-  "updated_at_iso": "2026-10-16T13:55:26.274728+00:00"
+  "updated_at": 1792173493973,
+  "updated_at_iso": "2026-10-16T17:58:13.973851+00:00"
 }
