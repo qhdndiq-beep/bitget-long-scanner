@@ -332,18 +332,24 @@ def ifvg_retest(candles, direction):
     return None
 
 
-def compression(candles):
+def compression(candles, retest_index=None):
     end = len(candles) - 1
-    start = end - COMPRESSION_LOOKBACK + 1
-    if start < 0:
+    if end < 0:
         return None
-    # Use the most recent COMPRESSION_LOOKBACK closed candles, including the latest closed candle.
+    # Measure consolidation AFTER the IFVG retest, not across the impulse that
+    # created/converted the gap. A full 8-bar high-low range often includes that
+    # impulse and falsely rejects otherwise valid tight retests.
+    lookback_start = max(0, end - COMPRESSION_LOOKBACK + 1)
+    start = max(lookback_start, retest_index if retest_index is not None else lookback_start)
     recent = candles[start:end + 1]
+    # Require at least 3 closed candles to avoid calling a single candle "compression".
+    if len(recent) < 3:
+        return {"ratio": None, "ok": False, "bars": len(recent)}
     a = latest_atr(candles)
     if not a:
         return None
     ratio = (max(x.h for x in recent) - min(x.l for x in recent)) / a
-    return {"ratio": ratio, "ok": ratio <= COMPRESSION_MAX_ATR}
+    return {"ratio": ratio, "ok": ratio <= COMPRESSION_MAX_ATR, "bars": len(recent)}
 
 
 def pre_move(candles, direction, n):
@@ -428,7 +434,7 @@ def evaluate(symbol):
             if not pattern:
                 continue
             diag_inc("ifvg_found")
-            comp = compression(c15)
+            comp = compression(c15, pattern["retest"])
             if not comp:
                 diag_inc("compression_reject")
                 continue
@@ -468,7 +474,7 @@ def evaluate(symbol):
                 "key_level_distance_atr": round(key["distance_atr"], 3),
                 "ifvg_low": pattern["zone"]["low"], "ifvg_high": pattern["zone"]["high"],
                 "ifvg_age_bars": len(c15) - 1 - pattern["zone"]["index"],
-                "compression_range_atr": round(comp["ratio"], 3),
+                "compression_range_atr": round(comp["ratio"], 3) if comp["ratio"] is not None else None,
                 "box_distance_atr": round(box["distance_atr"], 3),
                 "pre_move_fast": round(fast, 4), "pre_move_slow": round(slow, 4),
                 "rvol": round(vol, 2) if vol is not None else None,
