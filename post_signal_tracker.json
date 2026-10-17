@@ -105,30 +105,56 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "CTUSDT:LONG:1792185300000",
+          "ts": 1792215900000,
+          "time": "2026-10-17T05:45:00+00:00",
+          "close": 0.3501,
+          "high": 0.36285,
+          "low": 0.34774,
+          "current_move_pct": -8.6044,
+          "mfe_pct": 1.9919,
+          "mae_pct": -9.2205,
+          "mfe_atr": 2.2422,
+          "mae_atr": 10.3795,
+          "ma120": 0.3794224167,
+          "ma200": 0.3714147,
+          "atr14": 0.0043978571,
+          "structure_level": 0.37602,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
         "favorable_1atr_ts": 1792186200000,
-        "favorable_1_5atr_ts": 1792187100000
+        "favorable_1_5atr_ts": 1792187100000,
+        "adverse_1atr_ts": 1792210500000,
+        "reversal_watch_ts": 1792215900000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1792193439342,
       "metrics": {
         "entry": 0.38306,
-        "latest_close": 0.38275,
+        "latest_close": 0.3501,
         "mfe_price": 0.39069,
-        "mae_price": 0.38117,
+        "mae_price": 0.34774,
         "mfe_pct": 1.9919,
-        "mae_pct": 0.4934,
+        "mae_pct": 9.2205,
         "mfe_atr": 2.2422,
-        "mae_atr": 0.5554
+        "mae_atr": 10.3795
       },
       "first_decisive": {
         "ts": 1792187100000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792199700000
+      "last_update_ts": 1792215900000
     },
     "ZESTUSDT:LONG:1792173600000": {
       "signal_id": "ZESTUSDT:LONG:1792173600000",
@@ -258,6 +284,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "ZESTUSDT:LONG:1792173600000",
+          "ts": 1792215900000,
+          "time": "2026-10-17T05:45:00+00:00",
+          "close": 0.17993,
+          "high": 0.18001,
+          "low": 0.17838,
+          "current_move_pct": -1.3271,
+          "mfe_pct": 2.6817,
+          "mae_pct": -2.1771,
+          "mfe_atr": 5.4076,
+          "mae_atr": 4.3902,
+          "ma120": 0.180102,
+          "ma200": 0.17876475,
+          "atr14": 0.0005071429,
+          "structure_level": 0.18114,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -270,19 +320,19 @@
       "created_at": 1792184379903,
       "metrics": {
         "entry": 0.18235,
-        "latest_close": 0.1827,
+        "latest_close": 0.17993,
         "mfe_price": 0.18724,
-        "mae_price": 0.17971,
+        "mae_price": 0.17838,
         "mfe_pct": 2.6817,
-        "mae_pct": 1.4478,
+        "mae_pct": 2.1771,
         "mfe_atr": 5.4076,
-        "mae_atr": 2.9194
+        "mae_atr": 4.3902
       },
       "first_decisive": {
         "ts": 1792181700000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792199700000
+      "last_update_ts": 1792215900000
     },
     "RIVERUSDT:LONG:1792160100000": {
       "signal_id": "RIVERUSDT:LONG:1792160100000",
@@ -436,6 +486,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "RIVERUSDT:LONG:1792160100000",
+          "ts": 1792215900000,
+          "time": "2026-10-17T05:45:00+00:00",
+          "close": 1.078,
+          "high": 1.08,
+          "low": 1.077,
+          "current_move_pct": -8.5666,
+          "mfe_pct": 2.7142,
+          "mae_pct": -9.754,
+          "mfe_atr": 1.8211,
+          "mae_atr": 6.5447,
+          "ma120": 1.1051916667,
+          "ma200": 1.064495,
+          "atr14": 0.0060714286,
+          "structure_level": 1.173,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -448,7 +522,7 @@
       "created_at": 1792173493972,
       "metrics": {
         "entry": 1.179,
-        "latest_close": 1.087,
+        "latest_close": 1.078,
         "mfe_price": 1.211,
         "mae_price": 1.064,
         "mfe_pct": 2.7142,
@@ -460,7 +534,7 @@
         "ts": 1792161900000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792199700000
+      "last_update_ts": 1792215900000
     },
     "VETUSDT:LONG:1792125900000": {
       "signal_id": "VETUSDT:LONG:1792125900000",
@@ -35816,6 +35890,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1792200623874,
-  "updated_at_iso": "2026-10-17T01:30:23.874273+00:00"
+  "updated_at": 1792217208361,
+  "updated_at_iso": "2026-10-17T06:06:48.361546+00:00"
 }
