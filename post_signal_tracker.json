@@ -81,6 +81,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "CTUSDT:LONG:1792185300000",
+          "ts": 1792199700000,
+          "time": "2026-10-17T01:15:00+00:00",
+          "close": 0.38275,
+          "high": 0.38427,
+          "low": 0.3821,
+          "current_move_pct": -0.0809,
+          "mfe_pct": 1.9919,
+          "mae_pct": -0.4934,
+          "mfe_atr": 2.2422,
+          "mae_atr": 0.5554,
+          "ma120": 0.3796033333,
+          "ma200": 0.37006625,
+          "atr14": 0.0030707143,
+          "structure_level": 0.37602,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": true,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -92,19 +116,19 @@
       "created_at": 1792193439342,
       "metrics": {
         "entry": 0.38306,
-        "latest_close": 0.38571,
-        "mfe_price": 0.38878,
+        "latest_close": 0.38275,
+        "mfe_price": 0.39069,
         "mae_price": 0.38117,
-        "mfe_pct": 1.4932,
+        "mfe_pct": 1.9919,
         "mae_pct": 0.4934,
-        "mfe_atr": 1.6809,
+        "mfe_atr": 2.2422,
         "mae_atr": 0.5554
       },
       "first_decisive": {
         "ts": 1792187100000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792192500000
+      "last_update_ts": 1792199700000
     },
     "ZESTUSDT:LONG:1792173600000": {
       "signal_id": "ZESTUSDT:LONG:1792173600000",
@@ -210,6 +234,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "ZESTUSDT:LONG:1792173600000",
+          "ts": 1792199700000,
+          "time": "2026-10-17T01:15:00+00:00",
+          "close": 0.1827,
+          "high": 0.1827,
+          "low": 0.1827,
+          "current_move_pct": 0.1919,
+          "mfe_pct": 2.6817,
+          "mae_pct": -1.4478,
+          "mfe_atr": 5.4076,
+          "mae_atr": 2.9194,
+          "ma120": 0.1787681667,
+          "ma200": 0.17872585,
+          "atr14": 0.0009942857,
+          "structure_level": 0.18114,
+          "structure_reclaimed": false,
+          "ma120_side_relation": "ABOVE",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -222,7 +270,7 @@
       "created_at": 1792184379903,
       "metrics": {
         "entry": 0.18235,
-        "latest_close": 0.18112,
+        "latest_close": 0.1827,
         "mfe_price": 0.18724,
         "mae_price": 0.17971,
         "mfe_pct": 2.6817,
@@ -234,7 +282,7 @@
         "ts": 1792181700000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792192500000
+      "last_update_ts": 1792199700000
     },
     "RIVERUSDT:LONG:1792160100000": {
       "signal_id": "RIVERUSDT:LONG:1792160100000",
@@ -364,6 +412,30 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "RIVERUSDT:LONG:1792160100000",
+          "ts": 1792199700000,
+          "time": "2026-10-17T01:15:00+00:00",
+          "close": 1.087,
+          "high": 1.09,
+          "low": 1.083,
+          "current_move_pct": -7.8032,
+          "mfe_pct": 2.7142,
+          "mae_pct": -9.754,
+          "mfe_atr": 1.8211,
+          "mae_atr": 6.5447,
+          "ma120": 1.1055666667,
+          "ma200": 1.06243,
+          "atr14": 0.0077142857,
+          "structure_level": 1.173,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": false,
+          "opposite_candle": false,
+          "reversal_watch": false,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 0
         }
       ],
       "events": {
@@ -376,7 +448,7 @@
       "created_at": 1792173493972,
       "metrics": {
         "entry": 1.179,
-        "latest_close": 1.088,
+        "latest_close": 1.087,
         "mfe_price": 1.211,
         "mae_price": 1.064,
         "mfe_pct": 2.7142,
@@ -388,7 +460,7 @@
         "ts": 1792161900000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792192500000
+      "last_update_ts": 1792199700000
     },
     "VETUSDT:LONG:1792125900000": {
       "signal_id": "VETUSDT:LONG:1792125900000",
@@ -566,6 +638,30 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "VETUSDT:LONG:1792125900000",
+          "ts": 1792199700000,
+          "time": "2026-10-17T01:15:00+00:00",
+          "close": 0.006946,
+          "high": 0.006946,
+          "low": 0.006946,
+          "current_move_pct": -3.1646,
+          "mfe_pct": 0.8644,
+          "mae_pct": -5.4231,
+          "mfe_atr": 1.5782,
+          "mae_atr": 9.9018,
+          "ma120": 0.0070451583,
+          "ma200": 0.00695307,
+          "atr14": 1.52143e-05,
+          "structure_level": 0.007151,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
@@ -579,7 +675,7 @@
       "created_at": 1792141671598,
       "metrics": {
         "entry": 0.007173,
-        "latest_close": 0.006941,
+        "latest_close": 0.006946,
         "mfe_price": 0.007235,
         "mae_price": 0.006784,
         "mfe_pct": 0.8644,
@@ -591,7 +687,7 @@
         "ts": 1792126800000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792192500000
+      "last_update_ts": 1792199700000
     },
     "KSMUSDT:LONG:1792125900000": {
       "signal_id": "KSMUSDT:LONG:1792125900000",
@@ -769,6 +865,30 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "KSMUSDT:LONG:1792125900000",
+          "ts": 1792199700000,
+          "time": "2026-10-17T01:15:00+00:00",
+          "close": 4.461,
+          "high": 4.461,
+          "low": 4.461,
+          "current_move_pct": -2.4492,
+          "mfe_pct": 2.1867,
+          "mae_pct": -3.1927,
+          "mfe_atr": 5.668,
+          "mae_atr": 8.2753,
+          "ma120": 4.53115,
+          "ma200": 4.47225,
+          "atr14": 0.0079285714,
+          "structure_level": 4.536,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": false,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
@@ -782,7 +902,7 @@
       "created_at": 1792141671599,
       "metrics": {
         "entry": 4.573,
-        "latest_close": 4.471,
+        "latest_close": 4.461,
         "mfe_price": 4.673,
         "mae_price": 4.427,
         "mfe_pct": 2.1867,
@@ -794,7 +914,7 @@
         "ts": 1792126800000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792192500000
+      "last_update_ts": 1792199700000
     },
     "GMTUSDT:LONG:1792125900000": {
       "signal_id": "GMTUSDT:LONG:1792125900000",
@@ -972,6 +1092,30 @@
           "reversal_watch": true,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 1
+        },
+        {
+          "signal_id": "GMTUSDT:LONG:1792125900000",
+          "ts": 1792199700000,
+          "time": "2026-10-17T01:15:00+00:00",
+          "close": 0.007732,
+          "high": 0.007744,
+          "low": 0.007732,
+          "current_move_pct": -3.1199,
+          "mfe_pct": 0.8019,
+          "mae_pct": -4.5608,
+          "mfe_atr": 1.8174,
+          "mae_atr": 10.3367,
+          "ma120": 0.0078488833,
+          "ma200": 0.007784385,
+          "atr14": 1.9e-05,
+          "structure_level": 0.007869,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
@@ -985,7 +1129,7 @@
       "created_at": 1792141671599,
       "metrics": {
         "entry": 0.007981,
-        "latest_close": 0.007742,
+        "latest_close": 0.007732,
         "mfe_price": 0.008045,
         "mae_price": 0.007617,
         "mfe_pct": 0.8019,
@@ -997,7 +1141,7 @@
         "ts": 1792126800000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792192500000
+      "last_update_ts": 1792199700000
     },
     "KASUSDT:LONG:1792125900000": {
       "signal_id": "KASUSDT:LONG:1792125900000",
@@ -1175,19 +1319,44 @@
           "reversal_watch": false,
           "reversal_confirmed": false,
           "reversal_consecutive_bars": 0
+        },
+        {
+          "signal_id": "KASUSDT:LONG:1792125900000",
+          "ts": 1792199700000,
+          "time": "2026-10-17T01:15:00+00:00",
+          "close": 0.03613,
+          "high": 0.03622,
+          "low": 0.03613,
+          "current_move_pct": -2.0336,
+          "mfe_pct": 4.6367,
+          "mae_pct": -2.9013,
+          "mfe_atr": 7.1892,
+          "mae_atr": 4.4985,
+          "ma120": 0.0366768333,
+          "ma200": 0.03634105,
+          "atr14": 0.000175,
+          "structure_level": 0.03622,
+          "structure_reclaimed": true,
+          "ma120_side_relation": "BELOW",
+          "ma200_reclaimed": true,
+          "opposite_candle": true,
+          "reversal_watch": true,
+          "reversal_confirmed": false,
+          "reversal_consecutive_bars": 1
         }
       ],
       "events": {
         "favorable_1atr_ts": 1792132200000,
         "favorable_1_5atr_ts": 1792132200000,
-        "adverse_1atr_ts": 1792163700000
+        "adverse_1atr_ts": 1792163700000,
+        "reversal_watch_ts": 1792199700000
       },
       "completed": false,
       "outcome": "OPEN",
       "created_at": 1792141671599,
       "metrics": {
         "entry": 0.03688,
-        "latest_close": 0.03634,
+        "latest_close": 0.03613,
         "mfe_price": 0.03859,
         "mae_price": 0.03581,
         "mfe_pct": 4.6367,
@@ -1199,7 +1368,7 @@
         "ts": 1792132200000,
         "outcome": "DIRECTIONAL_EXPANSION"
       },
-      "last_update_ts": 1792192500000
+      "last_update_ts": 1792199700000
     },
     "WLFIUSDT:LONG:1792076400000": {
       "signal_id": "WLFIUSDT:LONG:1792076400000",
@@ -35647,6 +35816,6 @@
       "created_at": 1789974369533
     }
   },
-  "updated_at": 1792193439344,
-  "updated_at_iso": "2026-10-16T23:30:39.344333+00:00"
+  "updated_at": 1792200623874,
+  "updated_at_iso": "2026-10-17T01:30:23.874273+00:00"
 }
